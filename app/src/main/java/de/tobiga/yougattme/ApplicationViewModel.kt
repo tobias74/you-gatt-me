@@ -1,5 +1,6 @@
 package de.tobiga.yougattme
 
+import android.util.Log
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
@@ -68,6 +69,8 @@ class ApplicationViewModel : ViewModel() {
 
 
     fun moveForwardInTimeAndEvents() {
+        Log.d("ApplicationViewModel", "moveForwardInTimeAndEvents() called");
+
         val timePassedMillis = Instant.now().toEpochMilli() - lastMovedTimestamp.toEpochMilli()
         val timePassedSeconds = timePassedMillis.toDouble() / 1000
         val timePassedMinutes = timePassedSeconds / 60
