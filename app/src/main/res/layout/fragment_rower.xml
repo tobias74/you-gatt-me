@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layout xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <data>
+        <variable
+            name="rowerData"
+            type="de.tobiga.yougattme.gatt.fitnessmachine.RowerData" />
+    </data>
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <!-- Header -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Rower Simulation"
+                android:textStyle="bold"
+                android:textSize="18sp"
+                android:paddingBottom="8dp"/>
+
+            <!-- User Inputs Section -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="User Inputs"
+                android:textStyle="bold"
+                android:textSize="16sp"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp"/>
+
+            <!-- Stroke Rate -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingBottom="8dp">
+                <com.google.android.material.textfield.TextInputLayout
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:hint="Stroke Rate (strokes/min)">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etStrokeRateInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="number"/>
+                </com.google.android.material.textfield.TextInputLayout>
+            </LinearLayout>
+
+            <!-- Instantaneous Pace -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingBottom="8dp">
+                <com.google.android.material.textfield.TextInputLayout
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:hint="Instantaneous Pace (s/500m)">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etInstPaceInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="number"/>
+                </com.google.android.material.textfield.TextInputLayout>
+                <CheckBox
+                    android:id="@+id/cbInstPace"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Send"/>
+            </LinearLayout>
+
+            <!-- Instantaneous Power -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingBottom="8dp">
+                <com.google.android.material.textfield.TextInputLayout
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:hint="Instantaneous Power (W)">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etInstPowerInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="number"/>
+                </com.google.android.material.textfield.TextInputLayout>
+                <CheckBox
+                    android:id="@+id/cbInstPower"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Send"/>
+            </LinearLayout>
+
+            <!-- Heart Rate (Optional) -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingBottom="8dp">
+                <com.google.android.material.textfield.TextInputLayout
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:hint="Heart Rate (BPM)">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etHeartRateInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="number"/>
+                </com.google.android.material.textfield.TextInputLayout>
+                <CheckBox
+                    android:id="@+id/cbHeartRate"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Send"/>
+            </LinearLayout>
+
+            <!-- Calculated Data Section -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Calculated Data"
+                android:textStyle="bold"
+                android:textSize="18sp"
+                android:paddingTop="16dp"
+                android:paddingBottom="8dp"/>
+
+            <!-- Display the Calculated Stroke Count -->
+            <TextView
+                android:id="@+id/tvCalculatedStrokeCount"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text='@{String.format("Stroke Count: %f", rowerData.strokeCount)}' />
+
+            <!-- Received Data Section -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Received Data"
+                android:textStyle="bold"
+                android:textSize="18sp"
+                android:paddingTop="16dp"
+                android:paddingBottom="8dp"/>
+            <TextView
+                android:id="@+id/tvReceivedTargetPower"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Target Power:"/>
+            <TextView
+                android:id="@+id/tvReceivedRowerGrade"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Rower Grade:"/>
+            <TextView
+                android:id="@+id/tvReceivedFitnessMachineStarted"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Fitness Machine Started:"/>
+        </LinearLayout>
+    </ScrollView>
+</layout>

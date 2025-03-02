@@ -1,0 +1,67 @@
+<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto" xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <PreferenceCategory app:title="@string/watts_settings_header">
+
+        <SeekBarPreference
+            app:key="publishInterval"
+            app:defaultValue="250"
+            app:showSeekBarValue="true"
+            android:max="1000"
+            app:min="250"
+            android:summary="@string/summary_publish_interval_preference"
+            app:title="@string/publish_interval_title"
+            />
+
+
+        <SwitchPreferenceCompat
+            app:defaultValue="true"
+            app:key="cycling_power_activated"
+            app:title="@string/cycling_power_activated"
+            app:summaryOff="@string/cycling_power_summary_off"
+            app:summaryOn="@string/cycling_power_summary_on"
+            />
+
+        <SeekBarPreference
+            app:key="cycling_power_instant_power"
+            app:dependency="cycling_power_activated"
+            app:defaultValue="150"
+            app:showSeekBarValue="true"
+            android:max="1000"
+            app:min="0"
+            android:summary="@string/summary_cycling_power_instant_power_preference"
+            app:title="@string/cycling_power_instant_power_title"
+            />
+
+
+
+        <EditTextPreference
+            android:key="edittext"
+            android:title="Some input"
+            app:useSimpleSummaryProvider="true"
+            android:dialogTitle="This is the title"/>
+
+
+        <SwitchPreferenceCompat
+            app:defaultValue="true"
+            app:key="fitness_machine_activated"
+            app:title="@string/fitness_machine_activated"
+            app:summaryOff="@string/fitness_machine_summary_off"
+            app:summaryOn="@string/fitness_machine_summary_on"
+            />
+
+
+        <DropDownPreference
+            android:key="selected_fitness_machine"
+            app:dependency="fitness_machine_activated"
+            android:title="@string/select_fitness_machine_mode"
+            android:entries="@array/fitness_machine_entries"
+            app:useSimpleSummaryProvider="true"
+            android:entryValues="@array/fitness_machine_entry_values"/>
+
+
+    </PreferenceCategory>
+
+
+
+
+</PreferenceScreen>

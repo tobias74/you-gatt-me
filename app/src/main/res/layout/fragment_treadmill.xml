@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layout xmlns:android="http://schemas.android.com/apk/res/android">
+    <data>
+        <variable
+            name="treadmillData"
+            type="de.tobiga.yougattme.gatt.fitnessmachine.TreadmillData" />
+    </data>
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <!-- Header -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Treadmill Simulation"
+                android:textStyle="bold"
+                android:textSize="18sp"
+                android:paddingBottom="8dp"/>
+
+            <!-- User Inputs Section -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="User Inputs"
+                android:textStyle="bold"
+                android:textSize="16sp"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp"/>
+
+            <!-- Instantaneous Speed (Mandatory) -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingBottom="8dp">
+                <com.google.android.material.textfield.TextInputLayout
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:hint="Instantaneous Speed (km/h)">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etInstantaneousSpeedInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="numberDecimal"/>
+                </com.google.android.material.textfield.TextInputLayout>
+            </LinearLayout>
+
+            <!-- Step Rate (Mandatory) -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingBottom="8dp">
+                <com.google.android.material.textfield.TextInputLayout
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:hint="Step Rate (steps/min)">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etStepRateInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="number"/>
+                </com.google.android.material.textfield.TextInputLayout>
+            </LinearLayout>
+
+            <!-- Heart Rate (Optional) -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingBottom="8dp">
+                <com.google.android.material.textfield.TextInputLayout
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:hint="Heart Rate (BPM)">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etHeartRateInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="number"/>
+                </com.google.android.material.textfield.TextInputLayout>
+                <CheckBox
+                    android:id="@+id/cbHeartRate"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Send"/>
+            </LinearLayout>
+
+            <!-- (Optional) Calculated Data Section -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Calculated Data"
+                android:textStyle="bold"
+                android:textSize="18sp"
+                android:paddingTop="16dp"
+                android:paddingBottom="8dp"/>
+            <TextView
+                android:id="@+id/tvCalculatedExample"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text='@{String.format("Distance: %d m", treadmillData.totalDistance)}' />
+
+            <!-- (Optional) Received Data Section -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Received Data"
+                android:textStyle="bold"
+                android:textSize="18sp"
+                android:paddingTop="16dp"
+                android:paddingBottom="8dp"/>
+        </LinearLayout>
+    </ScrollView>
+</layout>

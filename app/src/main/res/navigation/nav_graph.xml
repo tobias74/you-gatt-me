@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/nav_graph"
+    app:startDestination="@id/nav_gatt_services">  <!-- Changed this line -->
+
+    <fragment
+        android:id="@+id/nav_gatt_services"
+        android:name="de.tobiga.yougattme.ui.GattServicesFragment"
+        android:label="GATT Services"
+        tools:layout="@layout/fragment_gatt_services" >
+
+        <action
+            android:id="@+id/action_gattServicesFragment_to_fitnessMachineFragment"
+            app:destination="@id/nav_fitness_machine" />
+
+        <action
+            android:id="@+id/action_gattServicesFragment_to_cyclingSpeedAndCadenceFragment"
+            app:destination="@id/cyclingSpeedAndCadenceFragment" />
+
+        <action
+            android:id="@+id/action_gattServicesFragment_to_cyclingPowerFragment"
+            app:destination="@id/cyclingPowerFragment" />
+
+        <action
+            android:id="@+id/action_gattServicesFragment_to_runningSpeedAndCadenceFragment"
+            app:destination="@id/runningSpeedAndCadenceFragment" />
+
+    </fragment>
+
+    <fragment
+        android:id="@+id/cyclingSpeedAndCadenceFragment"
+        android:name="de.tobiga.yougattme.ui.CyclingSpeedAndCadenceFragment"
+        android:label="Cycling Speed And Cadence"
+        tools:layout="@layout/fragment_cycling_speed_and_cadence" />
+
+
+    <fragment
+        android:id="@+id/nav_about"
+        android:name="de.tobiga.yougattme.ui.AboutFragment"
+        android:label="@string/menu_about"
+        tools:layout="@layout/fragment_about" />
+
+    <fragment
+        android:id="@+id/nav_imprint"
+        android:name="de.tobiga.yougattme.ui.ImprintFragment"
+        android:label="@string/menu_imprint"
+        tools:layout="@layout/fragment_imprint" />
+
+    <fragment
+        android:id="@+id/nav_gdpr"
+        android:name="de.tobiga.yougattme.ui.GdprFragment"
+        android:label="@string/menu_gdpr"
+        tools:layout="@layout/fragment_gdpr" />
+
+    <fragment
+        android:id="@+id/nav_toc"
+        android:name="de.tobiga.yougattme.ui.TocFragment"
+        android:label="@string/menu_toc"
+        tools:layout="@layout/fragment_toc" />
+
+    <fragment
+        android:id="@+id/nav_fitness_machine"
+        android:name="de.tobiga.yougattme.ui.FitnessMachineFragment"
+        android:label="@string/menu_fitness_machine"
+        tools:layout="@layout/fragment_fitness_machine" />
+
+    <fragment
+        android:id="@+id/settingsFragment"
+        android:label="@string/menu_settings"
+        android:name="de.tobiga.yougattme.ui.SettingsFragment"/>
+
+    <fragment
+        android:id="@+id/cyclingPowerFragment"
+        android:name="de.tobiga.yougattme.ui.CyclingPowerFragment"
+        android:label="Cycling Power"
+        tools:layout="@layout/fragment_cycling_power" />
+
+    <fragment
+        android:id="@+id/runningSpeedAndCadenceFragment"
+        android:name="de.tobiga.yougattme.ui.RunningSpeedAndCadenceFragment"
+        android:label="Running Speed And Cadence"
+        tools:layout="@layout/fragment_running_speed_and_cadence" />
+
+    <!--Global action-->
+    <action
+        android:id="@+id/open_settings_fragment"
+        app:destination="@id/settingsFragment"/>
+</navigation>

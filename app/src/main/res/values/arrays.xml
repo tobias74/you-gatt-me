@@ -1,0 +1,33 @@
+<resources>
+    <!-- Reply Preference -->
+    <string-array name="reply_entries">
+        <item>Reply</item>
+        <item>Reply to all</item>
+    </string-array>
+
+    <string-array name="reply_values">
+        <item>reply</item>
+        <item>reply_all</item>
+    </string-array>
+    <string-array name="fitness_machine_entries">
+        <item>Indoor Bike</item>
+        <item>Rower</item>
+        <item>Treadmill</item>
+        <item>Cross Trainer</item>
+    </string-array>
+
+    <string-array name="ftms_profile_entries">
+        <item>Rower</item>
+        <item>Indoor Bike</item>
+        <item>Treadmill</item>
+        <item>Cross Trainer</item>
+    </string-array>
+
+    <string-array name="fitness_machine_entry_values">
+        <item>Rower</item>
+        <item>Indoor Bike</item>
+        <item>Treadmill</item>
+        <item>Cross Trainer</item>
+    </string-array>
+
+</resources>

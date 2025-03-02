@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:showIn="navigation_view">
+
+    <group android:checkableBehavior="single">
+        <item
+            android:id="@+id/FirstFragment"
+            android:icon="@drawable/ic_baseline_chat_24"
+            android:title="@string/menu_home" />
+        <item
+            android:id="@+id/nav_about"
+            android:icon="@drawable/ic_baseline_about"
+            android:title="@string/menu_about" />
+        <item
+            android:id="@+id/settingsFragment"
+            android:icon="@drawable/ic_settings"
+            android:title="@string/action_settings" />
+        <item
+            android:id="@+id/nav_imprint"
+            android:icon="@drawable/ic_baseline_info"
+            android:title="@string/menu_imprint" />
+        <item
+            android:id="@+id/nav_toc"
+            android:icon="@drawable/ic_baseline_toc"
+            android:title="@string/menu_toc" />
+        <item
+            android:id="@+id/nav_gdpr"
+            android:icon="@drawable/ic_baseline_privacy_tip"
+            android:title="@string/menu_gdpr" />
+
+        <item
+            android:id="@+id/nav_fitness_machine"
+            android:icon="@drawable/ic_baseline_rowing"
+            android:title="@string/menu_fitness_machine" />
+
+    </group>
+</menu>

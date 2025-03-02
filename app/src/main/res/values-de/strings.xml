@@ -1,0 +1,49 @@
+<resources>
+    <string name="app_name">YouGattMe</string>
+    <string name="action_settings">Einstellungen</string>
+    <!-- Strings used for fragments for navigation -->
+    <string name="next">Weiter</string>
+    <string name="previous">Zur[ck</string>
+
+    <string name="nav_header_subtitle">Cycling Power Gatt Service</string>
+    <string name="nav_header_title">YouGattMe</string>
+
+    <string name="menu_imprint">Impressum</string>
+    <string name="menu_toc">Nutzungsbedingungen</string>
+    <string name="menu_gdpr">Datenschutz</string>
+    <string name="menu_about">About</string>
+    <string name="menu_home">Home</string>
+    <string name="watts">Watts</string>
+    <string name="menu_settings">Einstellungen</string>
+    <string name="watts_settings_header">GATT Server</string>
+    <string name="publish_interval_title">Aktualisierungs-Interval (ms)</string>
+    <string name="gatt_server_deactivated">GATT offline</string>
+    <string name="no_data">...</string>
+    <string name="no_bluetooth_support">Bluetooth wird nicht unterstützt...</string>
+    <string name="bluetooth_will_be_enabled">Bluetooth wird aktiviert...</string>
+    <string name="starting_services">Bluetooth ist aktiviert, Services werden gestartet...</string>
+    <string name="summary_publish_interval_preference">Der Wert wird erst nach dem Neustart des Gatt Servers verwendet</string>
+    <string name="menu_rower_data">Rower Data</string>
+    <string name="cycling_power_activated">Cycling Power</string>
+    <string name="cycling_power_summary_off">Cylcing power will not be broadcasted</string>
+    <string name="cycling_power_summary_on">Cycling power is broadcasted</string>
+    <string name="fitness_machine_activated">"Fitness machine "</string>
+    <string name="fitness_machine_summary_off">Fitness machine will not be broacasted</string>
+    <string name="fitness_machine_summary_on">Fitness machine is broadcasted</string>
+    <string name="select_fitness_machine_mode">Fitness Machine Selector</string>
+    <string name="label_rower_watts">Watts</string>
+    <string name="label_strokes_per_minute">Strokes per minute</string>
+    <string name="summary_cycling_power_instant_power_preference">The instant power to be broadcast within the Characteristic \"cycling_power_measurement\"</string>
+    <string name="cycling_power_instant_power_title">Cycling Power Measurement</string>
+    <string name="menu_fitness_machine">Fitness Machine</string>
+    <string name="activate_fitness_machine">Activate Fitness Machine</string>
+    <string name="fitness_machine_has_been_started_by_client">Fitness Machine has been started by client</string>
+    <string name="activate_running_speed_and_cadence">Activate RSC Profile</string>
+    <string name="menu_running_speed_and_cadence">RSC</string>
+    <string name="activate_cycling_power">Activate Cycling Power</string>
+    <string name="activate_cycling_speed_and_cadence">Activate CSC</string>
+    <string name="label_rower_seconds_per_500m">Seconds per 500m</string>
+    <string name="ftms_rower_power_present">Instant Power Present</string>
+    <string name="ftms_rower_pace_present">Instant Pace Present</string>
+
+</resources>
