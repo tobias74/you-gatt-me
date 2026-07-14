@@ -88,14 +88,18 @@ class ApplicationViewModel : ViewModel() {
 
 
     var cscIsProfileActive = MutableLiveData<Boolean>(false)
-    var cscSpeedKmH = MutableLiveData<Double>(4.0)
-    var cscCadence = MutableLiveData<Int>(90)
+    var cscSpeedKmH = MutableLiveData<Double>(25.0)
+    var cscCadence = MutableLiveData<Int>(80)
     var cscCumulativeWheelRevolutions = 0
     var cscCumulativeCrankRevolutions = 0
     var cscLastWheelEventTime = 0L
     var cscLastCrankEventTime = 0L
     var wheelRevolutionSimulator = WheelRevolutionSimulator()
     var crankRevolutionSimulator = CrankRevolutionSimulator()
+
+    var cyclingPowerSpeedKmH: Double = 25.0
+    var cyclingPowerCadence: Int = 80
+    var cyclingPowerWatts: Int = 152
 
 
 
@@ -178,9 +182,9 @@ class ApplicationViewModel : ViewModel() {
         get() = simulator.getLastCrankEventTimestampMillis().toLong()
 
     fun advanceTime(timePassedMillis: Long, lastMovedTimestamp: Long) {
-        val speedMps = instantaneousSpeed / 3.6
+        val speedMps = cyclingPowerSpeedKmH / 3.6
 
-        simulator.simulateCycling(speedMps, instantaneousCadence.toDouble(), timePassedMillis, lastMovedTimestamp)
+        simulator.simulateCycling(speedMps, cyclingPowerCadence.toDouble(), timePassedMillis, lastMovedTimestamp)
 
     }
 

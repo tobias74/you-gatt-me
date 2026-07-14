@@ -38,7 +38,7 @@ class CyclingPowerMeasurementCharacteristic(
 
         // --- 2. Encode all data fields using helper functions ---
         val flagsBytes = encodeShort(flags)
-        val powerBytes = encodeShort(profileData.instantaneousPower)
+        val powerBytes = encodeShort(profileData.cyclingPowerWatts)
 
         // Wheel Data
         val wheelRevBytes = encodeInt(profileData.cumulativeWheelRevolutions.toUInt())

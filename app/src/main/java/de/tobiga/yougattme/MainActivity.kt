@@ -13,6 +13,8 @@ import android.provider.Settings
 import android.view.View
 import android.widget.TextView
 import android.webkit.WebView
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.GridLayout
 import android.widget.LinearLayout
 import android.widget.Toast
@@ -71,6 +73,11 @@ class MainActivity : AppCompatActivity() {
         val toggle: FieldToggle
     )
 
+    private data class FtmsMachineOption(
+        val profileKey: String,
+        val label: String
+    )
+
     private lateinit var prefs: SharedPreferences
     private lateinit var binding: ActivityMainBinding
     private lateinit var cameraExecutor: ExecutorService
@@ -78,6 +85,7 @@ class MainActivity : AppCompatActivity() {
     private val viewModel: ApplicationViewModel by viewModels()
     private val logLines = ArrayDeque<String>()
     private val renderedFieldToggles = mutableListOf<RenderedFieldToggle>()
+    private var ftmsEnabled = true
     private var selectedFtmsProfileKey = "ftms_bike"
     private val selectedOptionalServiceKeys = linkedSetOf("csc", "cycling_power")
     private var suppressRuntimeSwitchCallback = false
@@ -118,14 +126,18 @@ class MainActivity : AppCompatActivity() {
             .toMap()
     }
 
+    private val ftmsMachineOptions = listOf(
+        FtmsMachineOption("ftms_bike", "Indoor Bike"),
+        FtmsMachineOption("ftms_rower", "Rower"),
+        FtmsMachineOption("ftms_treadmill", "Treadmill"),
+        FtmsMachineOption("ftms_cross", "Cross Trainer"),
+        FtmsMachineOption("ftms_step", "Step Climber"),
+        FtmsMachineOption("ftms_stair", "Stair Climber")
+    )
+
     private val profileButtons by lazy {
         mapOf(
-            "ftms_bike" to binding.buttonFtmsBike,
-            "ftms_rower" to binding.buttonFtmsRower,
-            "ftms_treadmill" to binding.buttonFtmsTreadmill,
-            "ftms_cross" to binding.buttonFtmsCrossTrainer,
-            "ftms_step" to binding.buttonFtmsStepClimber,
-            "ftms_stair" to binding.buttonFtmsStairClimber,
+            "ftms" to binding.buttonFtms,
             "csc" to binding.buttonCsc,
             "cycling_power" to binding.buttonCyclingPower,
             "rsc" to binding.buttonRsc
@@ -236,10 +248,51 @@ class MainActivity : AppCompatActivity() {
     private fun setupProfileActions() {
         profileButtons.forEach { (key, button) ->
             button.setOnClickListener {
-                profiles[key]?.let { toggleProfile(it) }
+                if (key == "ftms") {
+                    ftmsEnabled = !ftmsEnabled
+                    applySelectedServiceStack(rebuildGatt = true, logChange = true)
+                } else {
+                    profiles[key]?.let { toggleProfile(it) }
+                }
             }
         }
+        setupFtmsMachineDropdown()
         renderExtensionProfileButtons()
+    }
+
+    private fun setupFtmsMachineDropdown() {
+        val labels = ftmsMachineOptions.map { option -> option.label }
+        binding.spinnerFtmsMachine.adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_item,
+            labels
+        ).also { adapter ->
+            adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+        binding.spinnerFtmsMachine.setSelection(
+            ftmsMachineOptions.indexOfFirst { option -> option.profileKey == selectedFtmsProfileKey }
+                .coerceAtLeast(0),
+            false
+        )
+        binding.spinnerFtmsMachine.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val selectedKey = ftmsMachineOptions.getOrNull(position)?.profileKey ?: return
+                if (selectedKey == selectedFtmsProfileKey) {
+                    return
+                }
+                selectedFtmsProfileKey = selectedKey
+                renderedMachineFieldKey = null
+                if (::applicationState.isInitialized) {
+                    applySelectedServiceStack(rebuildGatt = ftmsEnabled, logChange = ftmsEnabled)
+                } else {
+                    updateDeviceStatePanel()
+                    updateSimulationValuesFromControls()
+                    renderMachineFieldControls()
+                }
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
     }
 
     private fun setupSimulationControls() {
@@ -251,6 +304,13 @@ class MainActivity : AppCompatActivity() {
         binding.sliderHeartRate.addOnChangeListener { _, _, _ -> updateSimulationValuesFromControls() }
         binding.sliderMetabolicEquivalent.addOnChangeListener { _, _, _ -> updateSimulationValuesFromControls() }
         binding.sliderTargetDuration.addOnChangeListener { _, _, _ -> updateSimulationValuesFromControls() }
+        binding.sliderCscSpeed.addOnChangeListener { _, _, _ -> updateSimulationValuesFromControls() }
+        binding.sliderCscCadence.addOnChangeListener { _, _, _ -> updateSimulationValuesFromControls() }
+        binding.sliderCyclingPower.addOnChangeListener { _, _, _ -> updateSimulationValuesFromControls() }
+        binding.sliderCyclingPowerSpeed.addOnChangeListener { _, _, _ -> updateSimulationValuesFromControls() }
+        binding.sliderCyclingPowerCadence.addOnChangeListener { _, _, _ -> updateSimulationValuesFromControls() }
+        binding.sliderRscSpeed.addOnChangeListener { _, _, _ -> updateSimulationValuesFromControls() }
+        binding.sliderRscCadence.addOnChangeListener { _, _, _ -> updateSimulationValuesFromControls() }
         binding.switchFtmsControlPoint.isChecked = viewModel.ftmsControlPointEnabled
         binding.switchFtmsControlPoint.setOnCheckedChangeListener { _, isChecked ->
             viewModel.ftmsControlPointEnabled = isChecked
@@ -280,6 +340,7 @@ class MainActivity : AppCompatActivity() {
         when (profile.selectionMode) {
             ProfileSelectionMode.FTMS_MACHINE -> {
                 selectedFtmsProfileKey = profile.key
+                ftmsEnabled = true
             }
 
             ProfileSelectionMode.OPTIONAL_SERVICE -> {
@@ -302,8 +363,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun applySelectedServiceStack(rebuildGatt: Boolean, logChange: Boolean) {
         if (::applicationState.isInitialized) {
-            val ftmsMode = profiles.getValue(selectedFtmsProfileKey).ftmsMode
-                ?: error("Selected FTMS profile is missing its FTMS mode")
+            val ftmsMode = if (ftmsEnabled) {
+                profiles.getValue(selectedFtmsProfileKey).ftmsMode
+                    ?: error("Selected FTMS profile is missing its FTMS mode")
+            } else {
+                null
+            }
             applicationState.configureProfileStack(
                 profiles = createSelectedGattProfiles(),
                 selectedFitnessMachineMode = ftmsMode,
@@ -318,13 +383,22 @@ class MainActivity : AppCompatActivity() {
         updateRuntimeState()
 
         if (logChange) {
-            appendLog("Configured ${selectedProfiles().joinToString(" + ") { it.title }}")
+            val configuredProfiles = selectedProfiles()
+            appendLog(
+                if (configuredProfiles.isEmpty()) {
+                    "Configured no active GATT services"
+                } else {
+                    "Configured ${configuredProfiles.joinToString(" + ") { it.title }}"
+                }
+            )
         }
     }
 
     private fun selectedProfiles(): List<GattProfileDefinition> {
         return buildList {
-            add(profiles.getValue(selectedFtmsProfileKey))
+            if (ftmsEnabled) {
+                add(profiles.getValue(selectedFtmsProfileKey))
+            }
             selectedOptionalServiceKeys.forEach { key ->
                 profiles[key]?.let { add(it) }
             }
@@ -342,6 +416,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun selectedMachineName(): String {
+        if (!ftmsEnabled) {
+            return "FTMS disabled"
+        }
         return when (profiles.getValue(selectedFtmsProfileKey).ftmsMode) {
             "indoor_bike" -> "Indoor Bike"
             "rower" -> "Rower"
@@ -366,8 +443,13 @@ class MainActivity : AppCompatActivity() {
         val controlPointEnabled = viewModel.ftmsControlPointEnabled
         val machineName = selectedMachineName()
 
-        binding.textDeviceStateTitle.text = if (workoutStarted) "Workout running" else "Workout idle"
+        binding.textDeviceStateTitle.text = when {
+            !ftmsEnabled -> "FTMS disabled"
+            workoutStarted -> "Workout running"
+            else -> "Workout idle"
+        }
         binding.textDeviceStateSubtitle.text = when {
+            !ftmsEnabled -> "Fitness Machine Service is not in the active GATT stack. Optional services can still advertise independently."
             !controlPointEnabled -> "FTMS Control Point is disabled. Clients can still read features and subscribe to measurement data."
             controlTaken && workoutStarted -> "A client owns the FTMS Control Point and the machine is publishing workout data."
             controlTaken -> "A client owns the FTMS Control Point. Waiting for Start or Resume."
@@ -392,7 +474,7 @@ class MainActivity : AppCompatActivity() {
     private fun updateProfileButtons() {
         val selectedKeys = selectedProfiles().map { it.key }.toSet()
         allProfileButtons().forEach { (key, button) ->
-            val selected = selectedKeys.contains(key)
+            val selected = if (key == "ftms") ftmsEnabled else selectedKeys.contains(key)
             button.strokeWidth = if (selected) dp(2) else dp(1)
             button.setTextColor(ContextCompat.getColor(this, if (selected) R.color.white else R.color.simulator_ink))
             button.backgroundTintList = ContextCompat.getColorStateList(
@@ -400,11 +482,13 @@ class MainActivity : AppCompatActivity() {
                 if (selected) R.color.simulator_moss else R.color.simulator_panel
             )
         }
+        binding.spinnerFtmsMachine.alpha = if (ftmsEnabled) 1f else 0.55f
     }
 
     private fun renderExtensionProfileButtons() {
         val extensionProfiles = profiles.values
             .filter { profile -> !profileButtons.containsKey(profile.key) }
+            .filter { profile -> profile.selectionMode != ProfileSelectionMode.FTMS_MACHINE }
             .sortedBy { profile -> profile.title }
 
         extensionProfileButtons.clear()
@@ -441,7 +525,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun renderMachineFieldControls() {
-        val renderKey = "$selectedFtmsProfileKey:${viewModel.ftmsControlPointEnabled}:${viewModel.ftmsMirrorTargetFeatureDeclarations}"
+        val renderKey = "$ftmsEnabled:$selectedFtmsProfileKey:${viewModel.ftmsControlPointEnabled}:${viewModel.ftmsMirrorTargetFeatureDeclarations}"
         if (renderedMachineFieldKey == renderKey) {
             return
         }
@@ -452,6 +536,11 @@ class MainActivity : AppCompatActivity() {
         renderedFieldToggles.clear()
         clearFieldToggleContainers()
         binding.layoutControlCapabilityToggleList.removeAllViews()
+        binding.layoutFtmsControlCapability.visibility = if (ftmsEnabled) View.VISIBLE else View.GONE
+
+        if (!ftmsEnabled) {
+            return
+        }
 
         val toggles = machineFieldToggles(selectedFtmsProfileKey)
         val measurementToggles = toggles.filter { toggle -> toggle.labelPrefix == "Feature/data" }
@@ -947,25 +1036,41 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateSimulationValuesFromControls() {
-        val speed = binding.sliderSpeed.value
-        val cadence = binding.sliderCadence.value.toInt()
-        val power = binding.sliderPower.value.toInt()
-        val resistance = binding.sliderResistance.value.toInt()
-        val inclination = binding.sliderInclination.value
-        val heartRate = binding.sliderHeartRate.value.toInt()
-        val metabolicEquivalent = binding.sliderMetabolicEquivalent.value
-        val targetDurationMinutes = binding.sliderTargetDuration.value.toInt()
-        val includeHeartRate = binding.switchHeartRate.isChecked
+        val ftmsSpeed = binding.sliderSpeed.value
+        val ftmsCadence = binding.sliderCadence.value.toInt()
+        val ftmsPower = binding.sliderPower.value.toInt()
+        val ftmsResistance = binding.sliderResistance.value.toInt()
+        val ftmsInclination = binding.sliderInclination.value
+        val ftmsHeartRate = binding.sliderHeartRate.value.toInt()
+        val ftmsMetabolicEquivalent = binding.sliderMetabolicEquivalent.value
+        val ftmsTargetDurationMinutes = binding.sliderTargetDuration.value.toInt()
+        val ftmsIncludeHeartRate = binding.switchHeartRate.isChecked
 
-        binding.labelSpeedValue.text = "Speed ${formatOne(speed)} km/h"
-        binding.labelCadenceValue.text = "Cadence $cadence rpm"
-        binding.labelPowerValue.text = "Power $power W"
-        binding.labelResistanceValue.text = "Resistance $resistance"
-        val inclineLabel = if (selectedFtmsProfileKey == "ftms_bike") "Grade" else "Inclination"
-        binding.labelInclinationValue.text = "$inclineLabel ${formatOne(inclination)}%"
-        binding.labelHeartRateValue.text = "Heart rate $heartRate bpm"
-        binding.labelMetabolicEquivalentValue.text = "Metabolic equivalent ${formatOne(metabolicEquivalent)} MET"
-        binding.labelTargetDurationValue.text = "Target duration $targetDurationMinutes min"
+        val cscSpeed = binding.sliderCscSpeed.value
+        val cscCadence = binding.sliderCscCadence.value.toInt()
+        val cyclingPower = binding.sliderCyclingPower.value.toInt()
+        val cyclingPowerSpeed = binding.sliderCyclingPowerSpeed.value
+        val cyclingPowerCadence = binding.sliderCyclingPowerCadence.value.toInt()
+        val rscSpeed = binding.sliderRscSpeed.value
+        val rscCadence = binding.sliderRscCadence.value.toInt()
+
+        binding.labelSpeedValue.text = "FTMS speed ${formatOne(ftmsSpeed)} km/h"
+        binding.labelCadenceValue.text = "FTMS cadence $ftmsCadence rpm"
+        binding.labelPowerValue.text = "FTMS power $ftmsPower W"
+        binding.labelResistanceValue.text = "FTMS resistance $ftmsResistance"
+        val inclineLabel = if (selectedFtmsProfileKey == "ftms_bike") "grade" else "inclination"
+        binding.labelInclinationValue.text = "FTMS $inclineLabel ${formatOne(ftmsInclination)}%"
+        binding.labelHeartRateValue.text = "FTMS heart rate $ftmsHeartRate bpm"
+        binding.labelMetabolicEquivalentValue.text = "FTMS metabolic equivalent ${formatOne(ftmsMetabolicEquivalent)} MET"
+        binding.labelTargetDurationValue.text = "FTMS target duration $ftmsTargetDurationMinutes min"
+        binding.labelCscSpeedValue.text = "CSC speed ${formatOne(cscSpeed)} km/h"
+        binding.labelCscCadenceValue.text = "CSC cadence $cscCadence rpm"
+        binding.labelCyclingPowerValue.text = "Cycling Power $cyclingPower W"
+        binding.labelCyclingPowerSpeedValue.text = "Cycling Power wheel speed ${formatOne(cyclingPowerSpeed)} km/h"
+        binding.labelCyclingPowerCadenceValue.text = "Cycling Power cadence $cyclingPowerCadence rpm"
+        binding.labelRscSpeedValue.text = "RSC speed ${formatOne(rscSpeed)} m/s"
+        binding.labelRscCadenceValue.text = "RSC cadence $rscCadence spm"
+
         binding.layoutIndoorBikeFieldControls.visibility = View.GONE
         binding.layoutMachineFieldControls.visibility = View.GONE
         val resistanceVisible = selectedFtmsProfileKey in setOf("ftms_bike", "ftms_rower", "ftms_cross")
@@ -975,72 +1080,83 @@ class MainActivity : AppCompatActivity() {
         binding.labelInclinationValue.visibility = if (inclinationVisible) View.VISIBLE else View.GONE
         binding.sliderInclination.visibility = if (inclinationVisible) View.VISIBLE else View.GONE
 
-        viewModel.ftmsIndoorBikeData.instantaneousSpeed = speed
-        viewModel.ftmsIndoorBikeData.instantaneousCadence = cadence
-        viewModel.ftmsIndoorBikeData.resistanceLevel = resistance
-        viewModel.ftmsIndoorBikeData.instantaneousPower = power
-        viewModel.ftmsIndoorBikeData.heartRate = heartRate
-        viewModel.ftmsIndoorBikeData.metabolicEquivalent = metabolicEquivalent
-        viewModel.ftmsIndoorBikeData.targetDurationSeconds = targetDurationMinutes * 60
-        viewModel.ftmsIndoorBikeData.includeHeartRate = includeHeartRate
+        viewModel.ftmsIndoorBikeData.instantaneousSpeed = ftmsSpeed
+        viewModel.ftmsIndoorBikeData.instantaneousCadence = ftmsCadence
+        viewModel.ftmsIndoorBikeData.resistanceLevel = ftmsResistance
+        viewModel.ftmsIndoorBikeData.instantaneousPower = ftmsPower
+        viewModel.ftmsIndoorBikeData.heartRate = ftmsHeartRate
+        viewModel.ftmsIndoorBikeData.metabolicEquivalent = ftmsMetabolicEquivalent
+        viewModel.ftmsIndoorBikeData.targetDurationSeconds = ftmsTargetDurationMinutes * 60
+        viewModel.ftmsIndoorBikeData.includeHeartRate = ftmsIncludeHeartRate
         if (selectedFtmsProfileKey == "ftms_bike") {
             val currentSimulation = viewModel.indoorCyclingSimulationParameters.value
             viewModel.updateSimulationParameters(
                 currentSimulation?.windSpeedMps ?: 0.0f,
-                inclination.toDouble(),
+                ftmsInclination.toDouble(),
                 currentSimulation?.crr ?: 0.004f,
                 currentSimulation?.cw ?: 0.5f
             )
         }
         updateIndoorBikeComputedSummary()
 
-        viewModel.ftmsRowerData.strokeRate = cadence
-        viewModel.ftmsRowerData.resistanceLevel = resistance
-        viewModel.ftmsRowerData.instantaneousPower = power
-        viewModel.ftmsRowerData.heartRate = heartRate
-        viewModel.ftmsRowerData.metabolicEquivalent = metabolicEquivalent
-        viewModel.ftmsRowerData.targetDurationSeconds = targetDurationMinutes * 60
-        viewModel.ftmsRowerData.includeHeartRate = includeHeartRate
+        viewModel.ftmsRowerData.strokeRate = ftmsCadence
+        viewModel.ftmsRowerData.resistanceLevel = ftmsResistance
+        viewModel.ftmsRowerData.instantaneousPower = ftmsPower
+        viewModel.ftmsRowerData.heartRate = ftmsHeartRate
+        viewModel.ftmsRowerData.metabolicEquivalent = ftmsMetabolicEquivalent
+        viewModel.ftmsRowerData.targetDurationSeconds = ftmsTargetDurationMinutes * 60
+        viewModel.ftmsRowerData.includeHeartRate = ftmsIncludeHeartRate
 
-        viewModel.ftmsTreadmillData.instantaneousSpeed = speed.coerceAtMost(25f)
-        viewModel.ftmsTreadmillData.inclinationPercent = inclination
-        viewModel.ftmsTreadmillData.instantaneousPower = power
-        viewModel.ftmsTreadmillData.heartRate = heartRate
-        viewModel.ftmsTreadmillData.metabolicEquivalent = metabolicEquivalent
-        viewModel.ftmsTreadmillData.targetDurationSeconds = targetDurationMinutes * 60
-        viewModel.ftmsTreadmillData.includeHeartRate = includeHeartRate
+        viewModel.ftmsTreadmillData.instantaneousSpeed = ftmsSpeed.coerceAtMost(25f)
+        viewModel.ftmsTreadmillData.inclinationPercent = ftmsInclination
+        viewModel.ftmsTreadmillData.instantaneousPower = ftmsPower
+        viewModel.ftmsTreadmillData.heartRate = ftmsHeartRate
+        viewModel.ftmsTreadmillData.metabolicEquivalent = ftmsMetabolicEquivalent
+        viewModel.ftmsTreadmillData.targetDurationSeconds = ftmsTargetDurationMinutes * 60
+        viewModel.ftmsTreadmillData.includeHeartRate = ftmsIncludeHeartRate
 
-        viewModel.ftmsCrossTrainerData.instantaneousSpeed = speed
-        viewModel.ftmsCrossTrainerData.instantaneousStepsPerMinute = cadence
-        viewModel.ftmsCrossTrainerData.resistanceLevel = resistance
-        viewModel.ftmsCrossTrainerData.inclinationPercent = inclination
-        viewModel.ftmsCrossTrainerData.instantaneousPower = power
-        viewModel.ftmsCrossTrainerData.heartRate = heartRate
-        viewModel.ftmsCrossTrainerData.metabolicEquivalent = metabolicEquivalent
-        viewModel.ftmsCrossTrainerData.targetDurationSeconds = targetDurationMinutes * 60
-        viewModel.ftmsCrossTrainerData.includeHeartRate = includeHeartRate
+        viewModel.ftmsCrossTrainerData.instantaneousSpeed = ftmsSpeed
+        viewModel.ftmsCrossTrainerData.instantaneousStepsPerMinute = ftmsCadence
+        viewModel.ftmsCrossTrainerData.resistanceLevel = ftmsResistance
+        viewModel.ftmsCrossTrainerData.inclinationPercent = ftmsInclination
+        viewModel.ftmsCrossTrainerData.instantaneousPower = ftmsPower
+        viewModel.ftmsCrossTrainerData.heartRate = ftmsHeartRate
+        viewModel.ftmsCrossTrainerData.metabolicEquivalent = ftmsMetabolicEquivalent
+        viewModel.ftmsCrossTrainerData.targetDurationSeconds = ftmsTargetDurationMinutes * 60
+        viewModel.ftmsCrossTrainerData.includeHeartRate = ftmsIncludeHeartRate
 
-        viewModel.ftmsStairClimberData.stepsPerMinute = cadence
-        viewModel.ftmsStairClimberData.heartRate = heartRate
-        viewModel.ftmsStairClimberData.metabolicEquivalent = metabolicEquivalent
-        viewModel.ftmsStairClimberData.targetDurationSeconds = targetDurationMinutes * 60
-        viewModel.ftmsStairClimberData.includeHeartRate = includeHeartRate
-        viewModel.ftmsStepClimberData.stepsPerMinute = cadence
-        viewModel.ftmsStepClimberData.heartRate = heartRate
-        viewModel.ftmsStepClimberData.metabolicEquivalent = metabolicEquivalent
-        viewModel.ftmsStepClimberData.targetDurationSeconds = targetDurationMinutes * 60
-        viewModel.ftmsStepClimberData.includeHeartRate = includeHeartRate
+        viewModel.ftmsStairClimberData.stepsPerMinute = ftmsCadence
+        viewModel.ftmsStairClimberData.heartRate = ftmsHeartRate
+        viewModel.ftmsStairClimberData.metabolicEquivalent = ftmsMetabolicEquivalent
+        viewModel.ftmsStairClimberData.targetDurationSeconds = ftmsTargetDurationMinutes * 60
+        viewModel.ftmsStairClimberData.includeHeartRate = ftmsIncludeHeartRate
+        viewModel.ftmsStepClimberData.stepsPerMinute = ftmsCadence
+        viewModel.ftmsStepClimberData.heartRate = ftmsHeartRate
+        viewModel.ftmsStepClimberData.metabolicEquivalent = ftmsMetabolicEquivalent
+        viewModel.ftmsStepClimberData.targetDurationSeconds = ftmsTargetDurationMinutes * 60
+        viewModel.ftmsStepClimberData.includeHeartRate = ftmsIncludeHeartRate
 
-        viewModel.instantaneousSpeed = speed
-        viewModel.instantaneousCadence = cadence
-        viewModel.instantaneousPower = power
-        viewModel.cscSpeedKmH.value = speed.toDouble()
-        viewModel.cscCadence.value = cadence
-        viewModel.runningSpeedAndCadenceData.instantaneousSpeed = speed.toDouble() / 3.6
-        viewModel.runningSpeedAndCadenceData.instantaneousCadence = cadence
+        // Keep legacy generic values aligned with FTMS for extension providers that have not defined their own controls yet.
+        viewModel.instantaneousSpeed = ftmsSpeed
+        viewModel.instantaneousCadence = ftmsCadence
+        viewModel.instantaneousPower = ftmsPower
+
+        viewModel.cscSpeedKmH.value = cscSpeed.toDouble()
+        viewModel.cscCadence.value = cscCadence
+
+        viewModel.cyclingPowerSpeedKmH = cyclingPowerSpeed.toDouble()
+        viewModel.cyclingPowerCadence = cyclingPowerCadence
+        viewModel.cyclingPowerWatts = cyclingPower
+
+        viewModel.runningSpeedAndCadenceData.instantaneousSpeed = rscSpeed.toDouble()
+        viewModel.runningSpeedAndCadenceData.instantaneousCadence = rscCadence
     }
 
     private fun updateIndoorBikeComputedSummary() {
+        if (!ftmsEnabled) {
+            binding.textIndoorBikeComputed.text = "FTMS disabled; FTMS values are retained for the next activation."
+            return
+        }
         binding.textIndoorBikeComputed.text = when (selectedFtmsProfileKey) {
             "ftms_rower" -> viewModel.ftmsRowerData.getComputedSummary()
             "ftms_treadmill" -> viewModel.ftmsTreadmillData.getComputedSummary()
