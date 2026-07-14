@@ -17,3 +17,9 @@ dependencyResolutionManagement {
 }
 rootProject.name = "YouGattMe"
 include ':app'
+include ':simulator-core'
+
+def localSettings = file("local.settings.gradle")
+if (localSettings.exists()) {
+    apply from: localSettings
+}

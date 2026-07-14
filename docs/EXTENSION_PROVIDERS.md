@@ -8,7 +8,7 @@ added without changing the core simulator UI and BLE lifecycle code.
 The public API lives in:
 
 ```text
-app/src/main/java/de/tobiga/yougattme/gatt/provider/
+simulator-core/src/main/java/de/tobiga/yougattme/gatt/provider/
 ```
 
 Core types:
@@ -55,9 +55,18 @@ Additional providers should:
 4. Return profiles that extend `AbstractGattProfile`.
 5. Avoid changing `ApplicationState`; it should only receive profile instances.
 
-The current app registers providers in `MainActivity.profileProviders`. A later
-module split can replace that list with manifest metadata discovery or another
-build-time registration mechanism.
+The app loads the standard provider and can load extension providers through
+generic manifest metadata. Extension builds may also use ignored local Gradle
+hooks to add provider modules without changing tracked public files.
+
+Generic local hooks:
+
+```text
+local.settings.gradle
+local.extensions.gradle
+```
+
+Both files are ignored by Git.
 
 ## Compatibility Rules
 

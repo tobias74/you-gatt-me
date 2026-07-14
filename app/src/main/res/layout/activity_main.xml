@@ -330,6 +330,41 @@
                         app:strokeColor="@color/simulator_line" />
 
                 </GridLayout>
+
+                <LinearLayout
+                    android:id="@+id/layoutExtensionProfileSection"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="18dp"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="sans-serif-condensed"
+                        android:letterSpacing="0.08"
+                        android:text="EXTENSIONS"
+                        android:textAllCaps="true"
+                        android:textColor="@color/simulator_moss"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:text="Locally attached provider modules can add simulator profiles here without changing the public app."
+                        android:textColor="@color/simulator_ink_muted"
+                        android:textSize="14sp" />
+
+                    <GridLayout
+                        android:id="@+id/gridExtensionProfiles"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:columnCount="2" />
+                </LinearLayout>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 

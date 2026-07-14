@@ -10,8 +10,11 @@ later without changing the public app behavior.
 app/
   src/main/java/de/tobiga/yougattme/
     ApplicationState.kt        BLE runtime and GATT server lifecycle
-    ApplicationViewModel.kt    Simulator state shared by UI and profiles
     MainActivity.kt            Main simulator UI
+    ui/                        Legacy fragment screens
+simulator-core/
+  src/main/java/de/tobiga/yougattme/
+    ApplicationViewModel.kt    Simulator state shared by UI and profiles
     gatt/                      GATT core, standard profiles, provider API
     tools/                     Measurement simulation helpers
     ui/                        Legacy fragment screens
@@ -19,7 +22,7 @@ app/
 
 ## Logical Boundaries
 
-`gatt/provider`
+`simulator-core:gatt/provider`
 
 Defines the neutral extension boundary:
 
@@ -28,7 +31,7 @@ Defines the neutral extension boundary:
 - `ProfileDependencies`
 - `ProfileSelectionMode`
 
-`gatt`
+`simulator-core:gatt`
 
 Contains reusable GATT primitives:
 
@@ -38,7 +41,7 @@ Contains reusable GATT primitives:
 - `SafeGattServiceManager`
 - common descriptors and characteristic base classes
 
-`gatt/fitnessmachine`, `gatt/csc`, `gatt/cyclingpower`, `gatt/rsc`
+`simulator-core:gatt/fitnessmachine`, `gatt/csc`, `gatt/cyclingpower`, `gatt/rsc`
 
 Contain standard Bluetooth profile implementations.
 
@@ -53,15 +56,13 @@ Owns the Android BLE server lifecycle. It accepts a list of `AbstractGattProfile
 instances, registers their services, starts advertising, and forwards GATT
 callbacks to the active profiles.
 
-## Intended Module Split
+## Module Split
 
-The current single-module structure can be split later as:
+The current split is:
 
 ```text
-profile-api/        provider interfaces and public dependency types
-gatt-core/          BLE server and reusable GATT primitives
-standard-profiles/  FTMS, CSC, Cycling Power, RSC, Battery, Device Info
-app/                Android UI and packaging
+simulator-core/  provider interfaces, simulator state, reusable GATT primitives, and standard profiles
+app/             Android UI, BLE runtime lifecycle, and packaging
 ```
 
 The public app must remain buildable and useful with only the standard provider.

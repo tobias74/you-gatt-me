@@ -14,7 +14,8 @@ data class GattProfileDefinition(
     val subtitle: String,
     val serviceUuid: String,
     val selectionMode: ProfileSelectionMode,
-    val ftmsMode: String? = null
+    val ftmsMode: String? = null,
+    val exclusiveGroup: String? = null
 )
 
 data class ProfileDependencies(

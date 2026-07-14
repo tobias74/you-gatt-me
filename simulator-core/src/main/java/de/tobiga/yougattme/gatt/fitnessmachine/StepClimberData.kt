@@ -2,7 +2,7 @@
 
 import androidx.databinding.BaseObservable
 import androidx.databinding.Bindable
-import de.tobiga.yougattme.BR
+import de.tobiga.yougattme.core.BR
 import kotlin.math.max
 
 class StepClimberData : BaseObservable() {

@@ -13,6 +13,7 @@ import android.provider.Settings
 import android.view.View
 import android.widget.TextView
 import android.webkit.WebView
+import android.widget.GridLayout
 import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -29,6 +30,7 @@ import de.tobiga.yougattme.gatt.AbstractGattProfile
 import de.tobiga.yougattme.gatt.fitnessmachine.FtmsTargetState
 import de.tobiga.yougattme.gatt.provider.GattProfileDefinition
 import de.tobiga.yougattme.gatt.provider.GattProfileProvider
+import de.tobiga.yougattme.gatt.provider.GattProfileProviderLoader
 import de.tobiga.yougattme.gatt.provider.ProfileDependencies
 import de.tobiga.yougattme.gatt.provider.ProfileSelectionMode
 import de.tobiga.yougattme.gatt.provider.StandardGattProfileProvider
@@ -82,6 +84,7 @@ class MainActivity : AppCompatActivity() {
     private var suppressFieldToggleCallback = false
     private var gattRuntimeStatus = GattRuntimeStatus("Disabled")
     private var renderedMachineFieldKey: String? = null
+    private val extensionProfileButtons = linkedMapOf<String, MaterialButton>()
     private val uiHandler = Handler(Looper.getMainLooper())
     private val indoorBikeSummaryRefresh = object : Runnable {
         override fun run() {
@@ -93,7 +96,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private val profileProviders: List<GattProfileProvider> by lazy {
-        listOf(StandardGattProfileProvider())
+        listOf(StandardGattProfileProvider()) + GattProfileProviderLoader.loadFromManifest(this)
     }
 
     private val profiles by lazy {
@@ -236,6 +239,7 @@ class MainActivity : AppCompatActivity() {
                 profiles[key]?.let { toggleProfile(it) }
             }
         }
+        renderExtensionProfileButtons()
     }
 
     private fun setupSimulationControls() {
@@ -282,6 +286,12 @@ class MainActivity : AppCompatActivity() {
                 if (selectedOptionalServiceKeys.contains(profile.key)) {
                     selectedOptionalServiceKeys.remove(profile.key)
                 } else {
+                    profile.exclusiveGroup?.let { exclusiveGroup ->
+                        val exclusiveKeys = profiles.values
+                            .filter { candidate -> candidate.exclusiveGroup == exclusiveGroup }
+                            .map { candidate -> candidate.key }
+                        selectedOptionalServiceKeys.removeAll(exclusiveKeys.toSet())
+                    }
                     selectedOptionalServiceKeys.add(profile.key)
                 }
             }
@@ -381,7 +391,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateProfileButtons() {
         val selectedKeys = selectedProfiles().map { it.key }.toSet()
-        profileButtons.forEach { (key, button) ->
+        allProfileButtons().forEach { (key, button) ->
             val selected = selectedKeys.contains(key)
             button.strokeWidth = if (selected) dp(2) else dp(1)
             button.setTextColor(ContextCompat.getColor(this, if (selected) R.color.white else R.color.simulator_ink))
@@ -390,6 +400,44 @@ class MainActivity : AppCompatActivity() {
                 if (selected) R.color.simulator_moss else R.color.simulator_panel
             )
         }
+    }
+
+    private fun renderExtensionProfileButtons() {
+        val extensionProfiles = profiles.values
+            .filter { profile -> !profileButtons.containsKey(profile.key) }
+            .sortedBy { profile -> profile.title }
+
+        extensionProfileButtons.clear()
+        binding.gridExtensionProfiles.removeAllViews()
+        binding.layoutExtensionProfileSection.visibility =
+            if (extensionProfiles.isEmpty()) View.GONE else View.VISIBLE
+
+        extensionProfiles.forEach { profile ->
+            val button = MaterialButton(this).apply {
+                text = profile.title
+                contentDescription = "${profile.title}. ${profile.subtitle}"
+                isAllCaps = false
+                minHeight = dp(64)
+                cornerRadius = dp(18)
+                strokeWidth = dp(1)
+                strokeColor = ContextCompat.getColorStateList(this@MainActivity, R.color.simulator_line)
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.simulator_ink))
+                backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.simulator_panel)
+                layoutParams = GridLayout.LayoutParams().apply {
+                    width = 0
+                    height = dp(64)
+                    columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
+                    setMargins(dp(4), dp(4), dp(4), dp(4))
+                }
+                setOnClickListener { toggleProfile(profile) }
+            }
+            binding.gridExtensionProfiles.addView(button)
+            extensionProfileButtons[profile.key] = button
+        }
+    }
+
+    private fun allProfileButtons(): Map<String, MaterialButton> {
+        return profileButtons + extensionProfileButtons
     }
 
     private fun renderMachineFieldControls() {

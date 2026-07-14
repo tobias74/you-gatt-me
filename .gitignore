@@ -4,9 +4,12 @@
 .idea/
 .DS_Store
 /build
+**/build/
 /captures
 .externalNativeBuild
 .cxx
 .kotlin/
 local.properties
+local.settings.gradle
+local.extensions.gradle
 release
