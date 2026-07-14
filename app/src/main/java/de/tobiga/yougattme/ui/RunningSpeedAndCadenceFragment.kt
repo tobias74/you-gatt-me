@@ -9,6 +9,7 @@ import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.ViewModelProvider
+import de.tobiga.yougattme.ApplicationState
 import de.tobiga.yougattme.ApplicationViewModel
 import de.tobiga.yougattme.databinding.FragmentRunningSpeedAndCadenceBinding
 import de.tobiga.yougattme.gatt.rsc.RunningSpeedAndCadenceProfileData
@@ -20,6 +21,7 @@ class RunningSpeedAndCadenceFragment : Fragment() {
 
     private lateinit var mainViewModel: ApplicationViewModel
     private lateinit var runningSpeedAndCadenceProfileData: RunningSpeedAndCadenceProfileData
+    private lateinit var applicationState: ApplicationState
 
 
     override fun onAttach(context: Context) {
@@ -38,6 +40,10 @@ class RunningSpeedAndCadenceFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+
+        applicationState = ApplicationState.getInstance(requireContext())
+
+        applicationState.activateRunningSpeedAndCadenceProfile()
 
         binding.btnSubmit.setOnClickListener {
             val speedText = binding.etSpeed.text.toString()

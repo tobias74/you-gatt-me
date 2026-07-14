@@ -31,7 +31,7 @@ class IndoorBikeFragment : Fragment() {
     override fun onAttach(context: Context) {
         super.onAttach(context)
         appState = ApplicationState.getInstance(context)
-        appState.setFitnessMachineMode("indoor_bike")
+        appState.activateFitnessMachineProfile("indoor_bike")
         mainViewModel = ViewModelProvider(requireActivity()).get(ApplicationViewModel::class.java)
         indoorBikeData = mainViewModel.ftmsIndoorBikeData
     }
@@ -94,9 +94,15 @@ class IndoorBikeFragment : Fragment() {
         mainViewModel.ftmsReceivedTargetInclination.observe(viewLifecycleOwner) { inclination ->
             binding.tvReceivedTargetInclination.text = "Target Inclination: ${inclination}°"
         }
-        mainViewModel.receivedIndoorBikeGrade.observe(viewLifecycleOwner) { grade ->
-            binding.tvReceivedIndoorBikeGrade.text = "Indoor Bike Grade: ${grade}"
+
+        // 🔁 CHANGED: Observe the bundled simulation parameters (grade lives here now)
+        mainViewModel.indoorCyclingSimulationParameters.observe(viewLifecycleOwner) { params ->
+            binding.tvReceivedIndoorBikeGrade.text = "Indoor Bike Grade: ${params.gradePercent}"
         }
+
+        // (old observer removed)
+        // mainViewModel.receivedIndoorBikeGrade.observe(viewLifecycleOwner) { grade -> ... }
+
         mainViewModel.fitnessMachineHasBeenStarted.observe(viewLifecycleOwner) { started ->
             binding.tvReceivedFitnessMachineStarted.text = "Fitness Machine Started: ${if (started) "Yes" else "No"}"
         }

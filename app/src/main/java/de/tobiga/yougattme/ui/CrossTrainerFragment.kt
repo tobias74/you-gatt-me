@@ -31,7 +31,7 @@ class CrossTrainerFragment : Fragment() {
     override fun onAttach(context: Context) {
         super.onAttach(context)
         appState = ApplicationState.getInstance(context)
-        appState.setFitnessMachineMode("cross_trainer")
+        appState.activateFitnessMachineProfile("cross_trainer")
         mainViewModel = ViewModelProvider(requireActivity()).get(ApplicationViewModel::class.java)
         crossTrainerData = mainViewModel.ftmsCrossTrainerData
     }

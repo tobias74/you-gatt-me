@@ -9,9 +9,9 @@ import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.ViewModelProvider
+import de.tobiga.yougattme.ApplicationState
 import de.tobiga.yougattme.ApplicationViewModel
 import de.tobiga.yougattme.databinding.FragmentCyclingSpeedAndCadenceBinding
-import de.tobiga.yougattme.gatt.csc.CyclingSpeedAndCadenceProfileData
 
 class CyclingSpeedAndCadenceFragment : Fragment() {
 
@@ -19,7 +19,7 @@ class CyclingSpeedAndCadenceFragment : Fragment() {
     private val binding get() = _binding!!
 
     private lateinit var mainViewModel: ApplicationViewModel
-    private lateinit var cyclingSpeedAndCadenceProfileData: CyclingSpeedAndCadenceProfileData
+    private lateinit var applicationState: ApplicationState
 
 
     private lateinit var otherMainViewModel: ApplicationViewModel
@@ -27,7 +27,6 @@ class CyclingSpeedAndCadenceFragment : Fragment() {
     override fun onAttach(context: Context) {
         super.onAttach(context)
         mainViewModel = ViewModelProvider(requireActivity()).get(ApplicationViewModel::class.java)
-        cyclingSpeedAndCadenceProfileData = mainViewModel.cyclingSpeedAndCadenceData
     }
 
     override fun onCreateView(
@@ -41,6 +40,10 @@ class CyclingSpeedAndCadenceFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
+        applicationState = ApplicationState.getInstance(requireContext())
+
+        applicationState.activateCyclingSpeedAndCadenceProfile()
+
         // Set up Submit button listener
         binding.btnSubmit.setOnClickListener {
             val speedText = binding.etSpeed.text.toString()
@@ -52,9 +55,9 @@ class CyclingSpeedAndCadenceFragment : Fragment() {
                 val cadence = cadenceText.toInt()         // rpm
                 val circumference = circumferenceText.toFloat() // in centimeters (or convert as needed)
 
-                cyclingSpeedAndCadenceProfileData.postInstantaneousSpeed(speed);
-                cyclingSpeedAndCadenceProfileData.postInstantaneousCadence(cadence);
-                cyclingSpeedAndCadenceProfileData.postWheelCircumference(circumference);
+                mainViewModel.postInstantaneousSpeed(speed);
+                mainViewModel.postInstantaneousCadence(cadence);
+                mainViewModel.postWheelCircumference(circumference);
 
                 Toast.makeText(requireContext(), "Data submitted successfully", Toast.LENGTH_SHORT).show()
             } catch (e: NumberFormatException) {

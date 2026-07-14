@@ -1,82 +1,110 @@
-package de.tobiga.yougattme.gatt.fitnessmachine.characteristics
+﻿package de.tobiga.yougattme.gatt.fitnessmachine.characteristics
 
 import android.bluetooth.BluetoothGattCharacteristic
-import android.util.Log
-import de.tobiga.yougattme.gatt.GattProfile
-import de.tobiga.yougattme.gatt.common.AbstractDataMeasurementCharacteristic
+import de.tobiga.yougattme.gatt.AbstractGattProfile
 import de.tobiga.yougattme.gatt.fitnessmachine.RowerData
-import java.util.*
-import kotlin.experimental.or
+import java.util.UUID
 
-class RowerDataCharacteristic(gattProfile: GattProfile, val rowerData: RowerData) : AbstractDataMeasurementCharacteristic(gattProfile) {
+private object RowerDataFlags {
+    const val AVERAGE_STROKE_RATE_PRESENT = 1
+    const val TOTAL_DISTANCE_PRESENT = 2
+    const val INSTANTANEOUS_PACE_PRESENT = 3
+    const val AVERAGE_PACE_PRESENT = 4
+    const val INSTANTANEOUS_POWER_PRESENT = 5
+    const val AVERAGE_POWER_PRESENT = 6
+    const val RESISTANCE_LEVEL_PRESENT = 7
+    const val EXPENDED_ENERGY_PRESENT = 8
+    const val HEART_RATE_PRESENT = 9
+    const val METABOLIC_EQUIVALENT_PRESENT = 10
+    const val ELAPSED_TIME_PRESENT = 11
+    const val REMAINING_TIME_PRESENT = 12
+}
 
-    private val secondPer500: Int = 180
-    val GATT_ROWER_DATA_CHARACTERISTIC_UUID: UUID = UUID.fromString("00002AD1-0000-1000-8000-00805f9b34fb")
+class RowerDataCharacteristic(
+    gattProfile: AbstractGattProfile,
+    private val rowerData: RowerData
+) : AbstractFitnessMachineDataCharacteristic(gattProfile) {
 
-    val BITMASK_INSTANTANEOUS_PACE = (0b00001000).toByte()
-    val BITMASK_INSTANTANEOUS_POWER = (0b00100000).toByte()
+    private val GATT_ROWER_DATA_CHARACTERISTIC_UUID: UUID =
+        UUID.fromString("00002AD1-0000-1000-8000-00805f9b34fb")
 
-    val BITMASK2_HEART_RATE = (0b00000010).toByte()
-
-    override fun getCharacteristicUUID(): UUID {
-        return GATT_ROWER_DATA_CHARACTERISTIC_UUID
-    }
+    override fun getCharacteristicUUID(): UUID = GATT_ROWER_DATA_CHARACTERISTIC_UUID
 
     init {
         gattCharacteristic = BluetoothGattCharacteristic(
             GATT_ROWER_DATA_CHARACTERISTIC_UUID,
-            BluetoothGattCharacteristic.PROPERTY_READ or BluetoothGattCharacteristic.PROPERTY_NOTIFY,
-            BluetoothGattCharacteristic.PERMISSION_READ)
-
+            BluetoothGattCharacteristic.PROPERTY_NOTIFY,
+            0
+        )
         activeDescriptors.forEach {
             gattCharacteristic.addDescriptor(it.gattDescriptor)
         }
     }
 
     override fun getData(): ByteArray {
+        val writer = FtmsPacketWriter()
+        writer.u16(buildFlags())
 
-        val field = ByteArray(100)
-        var bitmask1 = (0x00).toByte()
-        var bitmask2 = (0x00).toByte()
+        // More Data is never set in this simulator path, so stroke rate/count are mandatory.
+        writer.u8(rowerData.getStrokeRateHalfSpm())
+        writer.u16(rowerData.getStrokeCountTotal())
 
+        if (rowerData.includeAverageStrokeRate) {
+            writer.u8(rowerData.getAverageStrokeRateHalfSpm())
+        }
+        if (rowerData.includeTotalDistance) {
+            writer.u24(rowerData.getTotalDistanceMeters())
+        }
         if (rowerData.includeInstantaneousPace) {
-            bitmask1 = bitmask1 or BITMASK_INSTANTANEOUS_PACE
+            writer.u16(rowerData.getInstantaneousPaceSeconds())
         }
-
+        if (rowerData.includeAveragePace) {
+            writer.u16(rowerData.getAveragePaceSeconds())
+        }
         if (rowerData.includeInstantaneousPower) {
-            bitmask1 = bitmask1 or BITMASK_INSTANTANEOUS_POWER
+            writer.s16(rowerData.getInstantaneousPowerWatt())
         }
-
+        if (rowerData.includeAveragePower) {
+            writer.s16(rowerData.getAveragePowerWatt())
+        }
+        if (rowerData.includeResistanceLevel) {
+            writer.s16(rowerData.getResistanceLevelRaw())
+        }
+        if (rowerData.includeExpendedEnergy) {
+            writer.u16(rowerData.getTotalEnergyKcal())
+            writer.u16(rowerData.getEnergyPerHourKcal())
+            writer.u8(rowerData.getEnergyPerMinuteKcal())
+        }
         if (rowerData.includeHeartRate) {
-            bitmask2 = bitmask2 or BITMASK2_HEART_RATE
+            writer.u8(rowerData.getHeartRateBpm())
+        }
+        if (rowerData.includeMetabolicEquivalent) {
+            writer.u8(rowerData.getMetabolicEquivalentTenths())
+        }
+        if (rowerData.includeElapsedTime) {
+            writer.u16(rowerData.getElapsedTimeSeconds())
+        }
+        if (rowerData.includeRemainingTime) {
+            writer.u16(rowerData.getRemainingTimeSeconds())
         }
 
-        field[0] = bitmask1
-        field[1] = bitmask2
-        val strokeCount = rowerData.strokeCount.toInt()
-        field[2] = ((rowerData.strokeRate * 2).toInt() and 0xFF).toByte()
-        field[3] = (0xFF and strokeCount).toByte()
-        field[4] = (strokeCount shr 8).toByte()
+        return writer.bytes()
+    }
 
-        var index = 5
-
-        if (rowerData.includeInstantaneousPace) {
-            field[index] = (0xFF and rowerData.instantaneousPace).toByte()
-            field[index+1] = (rowerData.instantaneousPace shr 8).toByte()
-            index +=2
-        }
-
-        if (rowerData.includeInstantaneousPower) {
-            field[index] = (0xFF and rowerData.instantaneousPower).toByte()
-            field[index+1] = (rowerData.instantaneousPower shr 8).toByte()
-            index +=2
-        }
-
-        if (rowerData.includeHeartRate) {
-            field[index] = (0x45).toByte()
-            index += 1
-        }
-
-        return field.copyOf(index)
+    private fun buildFlags(): Int {
+        var flags = 0
+        if (rowerData.includeAverageStrokeRate) flags = flags or (1 shl RowerDataFlags.AVERAGE_STROKE_RATE_PRESENT)
+        if (rowerData.includeTotalDistance) flags = flags or (1 shl RowerDataFlags.TOTAL_DISTANCE_PRESENT)
+        if (rowerData.includeInstantaneousPace) flags = flags or (1 shl RowerDataFlags.INSTANTANEOUS_PACE_PRESENT)
+        if (rowerData.includeAveragePace) flags = flags or (1 shl RowerDataFlags.AVERAGE_PACE_PRESENT)
+        if (rowerData.includeInstantaneousPower) flags = flags or (1 shl RowerDataFlags.INSTANTANEOUS_POWER_PRESENT)
+        if (rowerData.includeAveragePower) flags = flags or (1 shl RowerDataFlags.AVERAGE_POWER_PRESENT)
+        if (rowerData.includeResistanceLevel) flags = flags or (1 shl RowerDataFlags.RESISTANCE_LEVEL_PRESENT)
+        if (rowerData.includeExpendedEnergy) flags = flags or (1 shl RowerDataFlags.EXPENDED_ENERGY_PRESENT)
+        if (rowerData.includeHeartRate) flags = flags or (1 shl RowerDataFlags.HEART_RATE_PRESENT)
+        if (rowerData.includeMetabolicEquivalent) flags = flags or (1 shl RowerDataFlags.METABOLIC_EQUIVALENT_PRESENT)
+        if (rowerData.includeElapsedTime) flags = flags or (1 shl RowerDataFlags.ELAPSED_TIME_PRESENT)
+        if (rowerData.includeRemainingTime) flags = flags or (1 shl RowerDataFlags.REMAINING_TIME_PRESENT)
+        return flags
     }
 }

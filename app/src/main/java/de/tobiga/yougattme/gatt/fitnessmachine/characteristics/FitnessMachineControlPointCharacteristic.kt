@@ -1,19 +1,21 @@
-package de.tobiga.yougattme.gatt.fitnessmachine.characteristics
+﻿package de.tobiga.yougattme.gatt.fitnessmachine.characteristics
 
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCharacteristic
 import android.util.Log
 import de.tobiga.yougattme.ApplicationViewModel
-import de.tobiga.yougattme.gatt.GattProfile
+import de.tobiga.yougattme.gatt.AbstractGattProfile
 import de.tobiga.yougattme.gatt.TobigaGattCharacteristic
 import de.tobiga.yougattme.gatt.common.ClientConfigDescriptor
-import de.tobiga.yougattme.gatt.common.ServerConfigDescriptor
 import de.tobiga.yougattme.gatt.common.UserDescriptor
-import de.tobiga.yougattme.tools.byteToInt
-import de.tobiga.yougattme.tools.bytesToInt16
+import de.tobiga.yougattme.gatt.fitnessmachine.FTMS_SPIN_DOWN_STATUS_REQUESTED
+import de.tobiga.yougattme.gatt.fitnessmachine.FtmsHeartRateZoneTargets
+import de.tobiga.yougattme.gatt.fitnessmachine.FtmsSpinDownTarget
+import de.tobiga.yougattme.gatt.fitnessmachine.FtmsTargetState
+import de.tobiga.yougattme.gatt.fitnessmachine.IndoorCyclingSimulationParameters
 import de.tobiga.yougattme.tools.toHex
-import java.util.*
+import java.util.UUID
 
 object REQUEST_CODE {
     const val REQUEST_CONTROL = 0x00
@@ -22,9 +24,21 @@ object REQUEST_CODE {
     const val SET_TARGET_INCLINATION = 0x03
     const val SET_TARGET_RESISTANCE_LEVEL = 0x04
     const val SET_TARGET_POWER = 0x05
+    const val SET_TARGET_HEART_RATE = 0x06
     const val START_OR_RESUME = 0x07
     const val STOP_OR_PAUSE = 0x08
+    const val SET_TARGETED_EXPENDED_ENERGY = 0x09
+    const val SET_TARGETED_NUMBER_OF_STEPS = 0x0A
+    const val SET_TARGETED_NUMBER_OF_STRIDES = 0x0B
+    const val SET_TARGETED_DISTANCE = 0x0C
+    const val SET_TARGETED_TRAINING_TIME = 0x0D
+    const val SET_TARGETED_TIME_IN_TWO_HEART_RATE_ZONES = 0x0E
+    const val SET_TARGETED_TIME_IN_THREE_HEART_RATE_ZONES = 0x0F
+    const val SET_TARGETED_TIME_IN_FIVE_HEART_RATE_ZONES = 0x10
     const val SET_INDOOR_BIKE_SIMULATION = 0x11
+    const val SET_WHEEL_CIRCUMFERENCE = 0x12
+    const val SPIN_DOWN_CONTROL = 0x13
+    const val SET_TARGETED_CADENCE = 0x14
 }
 
 const val RESPONSE_CODE = 0x80
@@ -37,38 +51,61 @@ object RESULT_CODE {
     const val CONTROL_NOT_PERMITTED = 0x05
 }
 
-class FitnessMachineControlPointCharacteristic(gattProfile: GattProfile, val mainViewModel: ApplicationViewModel) : TobigaGattCharacteristic(gattProfile) {
+private const val ATT_ERROR_PROCEDURE_ALREADY_IN_PROGRESS = 0x80
+private const val ATT_ERROR_CCCD_IMPROPERLY_CONFIGURED = 0x81
+private const val SPIN_DOWN_START = 0x01
+private const val SPIN_DOWN_IGNORE = 0x02
+
+private data class ControlPointProcedureResult(
+    val resultCode: Int,
+    val responseParameters: ByteArray = ByteArray(0)
+)
+
+class FitnessMachineControlPointCharacteristic(
+    gattProfile: AbstractGattProfile,
+    private val machineType: String,
+    private val mainViewModel: ApplicationViewModel,
+    private val statusCharacteristic: FitnessMachineStatusCharacteristic,
+    private val trainingStatusCharacteristic: TrainingStatusCharacteristic
+) : TobigaGattCharacteristic(gattProfile) {
 
     var clientConfigDescriptor: ClientConfigDescriptor
-    val GATT_FITNESS_MACHINE_CONTROL_POINT_CHARACTERISTIC_UUID: UUID = UUID.fromString("00002AD9-0000-1000-8000-00805f9b34fb")
+    private var controlOwner: BluetoothDevice? = null
+    private var procedureInProgress = false
 
+    private val GATT_FITNESS_MACHINE_CONTROL_POINT_CHARACTERISTIC_UUID: UUID =
+        UUID.fromString("00002AD9-0000-1000-8000-00805f9b34fb")
 
-    override fun getCharacteristicUUID(): UUID {
-        return GATT_FITNESS_MACHINE_CONTROL_POINT_CHARACTERISTIC_UUID
-    }
+    override fun getCharacteristicUUID(): UUID = GATT_FITNESS_MACHINE_CONTROL_POINT_CHARACTERISTIC_UUID
 
     init {
-        clientConfigDescriptor = ClientConfigDescriptor(gattProfile)
+        clientConfigDescriptor = ClientConfigDescriptor(
+            gattProfile,
+            supportsNotifications = false,
+            supportsIndications = true
+        )
         activeDescriptors.add(clientConfigDescriptor)
         activeDescriptors.add(UserDescriptor(gattProfile))
-        activeDescriptors.add(ServerConfigDescriptor(gattProfile))
-
 
         gattCharacteristic = BluetoothGattCharacteristic(
             GATT_FITNESS_MACHINE_CONTROL_POINT_CHARACTERISTIC_UUID,
-            BluetoothGattCharacteristic.PROPERTY_WRITE or BluetoothGattCharacteristic.PROPERTY_INDICATE, BluetoothGattCharacteristic.PERMISSION_WRITE)
-
+            BluetoothGattCharacteristic.PROPERTY_WRITE or BluetoothGattCharacteristic.PROPERTY_INDICATE,
+            BluetoothGattCharacteristic.PERMISSION_WRITE
+        )
 
         activeDescriptors.forEach {
             gattCharacteristic.addDescriptor(it.gattDescriptor)
-
         }
-
     }
 
     override fun onReadRequest(device: BluetoothDevice, requestId: Int, offset: Int) {
-        gattProfile.bluetoothGattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS,0, null)
-
+        gattProfile.bluetoothGattServer!!.sendResponse(
+            device,
+            requestId,
+            BluetoothGatt.GATT_READ_NOT_PERMITTED,
+            0,
+            null
+        )
     }
 
     override fun onWriteRequest(
@@ -79,45 +116,461 @@ class FitnessMachineControlPointCharacteristic(gattProfile: GattProfile, val mai
         offset: Int,
         value: ByteArray
     ) {
-        if (responseNeeded) {
-            gattProfile.bluetoothGattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS,0, null)
+        Log.d("FitnessMachineControlPoint", "Write from ${device.address}: ${value.toHex()}")
+
+        if (offset != 0 || preparedWrite || value.isEmpty()) {
+            sendWriteResponse(device, requestId, responseNeeded, BluetoothGatt.GATT_FAILURE)
+            return
         }
 
-        val code = value[0].toInt()
-
-        val byteList = when (code) {
-            REQUEST_CODE.REQUEST_CONTROL -> {
-                mainViewModel.controlHasBeenTakenInControlPoint.postValue(true)
-                arrayOf(RESPONSE_CODE, code, RESULT_CODE.SUCCESS).map { it.toByte() }
-            }
-            REQUEST_CODE.RESET -> {
-                mainViewModel.controlHasBeenTakenInControlPoint.postValue(false)
-                arrayOf(RESPONSE_CODE, code, RESULT_CODE.SUCCESS).map { it.toByte() }
-            }
-            REQUEST_CODE.SET_TARGET_POWER -> {
-                mainViewModel.receivedTargetPowerInControlPoint.postValue(byteToInt(value.copyOfRange(1,3)))
-                arrayOf(RESPONSE_CODE, code, RESULT_CODE.SUCCESS).map { it.toByte() }
-            }
-            REQUEST_CODE.SET_TARGET_INCLINATION -> {
-                val gradeValue = bytesToInt16(value.copyOfRange(1,3))
-                mainViewModel.ftmsReceivedTargetInclination.postValue(gradeValue.toDouble() * 0.1)
-                arrayOf(RESPONSE_CODE, code, RESULT_CODE.SUCCESS).map { it.toByte() }
-            }
-            REQUEST_CODE.SET_INDOOR_BIKE_SIMULATION -> {
-                val gradeValue = bytesToInt16(value.copyOfRange(3,5))
-                mainViewModel.receivedIndoorBikeGrade.postValue(gradeValue.toDouble() * 0.01)
-                arrayOf(RESPONSE_CODE, code, RESULT_CODE.SUCCESS).map { it.toByte() }
-            }
-            REQUEST_CODE.START_OR_RESUME -> {
-                mainViewModel.fitnessMachineHasBeenStarted.postValue(true)
-                arrayOf(RESPONSE_CODE, code, RESULT_CODE.SUCCESS).map { it.toByte() }
-            }
-            else -> arrayOf(RESPONSE_CODE, code, RESULT_CODE.OP_CODE_NOT_SUPPORTED).map { it.toByte() }
+        if (!clientConfigDescriptor.isIndicationEnabled(device)) {
+            sendWriteResponse(device, requestId, responseNeeded, ATT_ERROR_CCCD_IMPROPERLY_CONFIGURED)
+            return
         }
 
-        gattCharacteristic.value = byteList.toByteArray()
-        gattProfile.bluetoothGattServer?.notifyCharacteristicChanged(device, gattCharacteristic, false)
+        if (procedureInProgress) {
+            sendWriteResponse(device, requestId, responseNeeded, ATT_ERROR_PROCEDURE_ALREADY_IN_PROGRESS)
+            return
+        }
 
+        sendWriteResponse(device, requestId, responseNeeded, BluetoothGatt.GATT_SUCCESS)
+
+        procedureInProgress = true
+        val requestCode = value[0].toInt() and 0xFF
+        val result = handleProcedure(device, requestCode, value)
+        sendControlPointResponse(device, requestCode, result.resultCode, result.responseParameters)
+        procedureInProgress = false
     }
 
+    private fun handleProcedure(device: BluetoothDevice, requestCode: Int, value: ByteArray): ControlPointProcedureResult {
+        if (requestCode == REQUEST_CODE.REQUEST_CONTROL) {
+            return handleRequestControl(device, value)
+        }
+
+        if (!isSupportedControlProcedure(requestCode)) {
+            return ControlPointProcedureResult(RESULT_CODE.OP_CODE_NOT_SUPPORTED)
+        }
+
+        if (!isControlOwner(device)) {
+            return ControlPointProcedureResult(RESULT_CODE.CONTROL_NOT_PERMITTED)
+        }
+
+        return when (requestCode) {
+            REQUEST_CODE.RESET -> handleReset(value)
+            REQUEST_CODE.SET_TARGET_SPEED -> handleSetTargetSpeed(value)
+            REQUEST_CODE.SET_TARGET_INCLINATION -> handleSetTargetInclination(value)
+            REQUEST_CODE.SET_TARGET_RESISTANCE_LEVEL -> handleSetTargetResistanceLevel(value)
+            REQUEST_CODE.SET_TARGET_POWER -> handleSetTargetPower(value)
+            REQUEST_CODE.SET_TARGET_HEART_RATE -> handleSetTargetHeartRate(value)
+            REQUEST_CODE.START_OR_RESUME -> handleStartOrResume(value)
+            REQUEST_CODE.STOP_OR_PAUSE -> handleStopOrPause(value)
+            REQUEST_CODE.SET_TARGETED_EXPENDED_ENERGY -> handleSetTargetedExpendedEnergy(value)
+            REQUEST_CODE.SET_TARGETED_NUMBER_OF_STEPS -> handleSetTargetedNumberOfSteps(value)
+            REQUEST_CODE.SET_TARGETED_NUMBER_OF_STRIDES -> handleSetTargetedNumberOfStrides(value)
+            REQUEST_CODE.SET_TARGETED_DISTANCE -> handleSetTargetedDistance(value)
+            REQUEST_CODE.SET_TARGETED_TRAINING_TIME -> handleSetTargetedTrainingTime(value)
+            REQUEST_CODE.SET_TARGETED_TIME_IN_TWO_HEART_RATE_ZONES -> handleSetTargetedTimeInHeartRateZones(value, 2)
+            REQUEST_CODE.SET_TARGETED_TIME_IN_THREE_HEART_RATE_ZONES -> handleSetTargetedTimeInHeartRateZones(value, 3)
+            REQUEST_CODE.SET_TARGETED_TIME_IN_FIVE_HEART_RATE_ZONES -> handleSetTargetedTimeInHeartRateZones(value, 5)
+            REQUEST_CODE.SET_INDOOR_BIKE_SIMULATION -> handleSetIndoorBikeSimulationParameters(value)
+            REQUEST_CODE.SET_WHEEL_CIRCUMFERENCE -> handleSetWheelCircumference(value)
+            REQUEST_CODE.SPIN_DOWN_CONTROL -> handleSpinDownControl(value)
+            REQUEST_CODE.SET_TARGETED_CADENCE -> handleSetTargetedCadence(value)
+            else -> ControlPointProcedureResult(RESULT_CODE.OP_CODE_NOT_SUPPORTED)
+        }
+    }
+
+    private fun isSupportedControlProcedure(requestCode: Int): Boolean {
+        val targetFeatures = mainViewModel.ftmsTargetFeatures
+        return when (requestCode) {
+            REQUEST_CODE.RESET,
+            REQUEST_CODE.START_OR_RESUME,
+            REQUEST_CODE.STOP_OR_PAUSE -> true
+            REQUEST_CODE.SET_TARGET_SPEED -> targetFeatures.targetSpeed && supportsTargetSpeed()
+            REQUEST_CODE.SET_TARGET_INCLINATION -> targetFeatures.targetInclination && supportsTargetInclination()
+            REQUEST_CODE.SET_TARGET_RESISTANCE_LEVEL -> targetFeatures.targetResistanceLevel && supportsTargetResistance()
+            REQUEST_CODE.SET_TARGET_POWER -> targetFeatures.targetPower && supportsTargetPower()
+            REQUEST_CODE.SET_TARGET_HEART_RATE -> targetFeatures.targetHeartRate
+            REQUEST_CODE.SET_TARGETED_EXPENDED_ENERGY -> targetFeatures.targetedExpendedEnergy
+            REQUEST_CODE.SET_TARGETED_NUMBER_OF_STEPS -> targetFeatures.targetedSteps && supportsTargetSteps()
+            REQUEST_CODE.SET_TARGETED_NUMBER_OF_STRIDES -> targetFeatures.targetedStrides && supportsTargetStrides()
+            REQUEST_CODE.SET_TARGETED_DISTANCE -> targetFeatures.targetedDistance && supportsTargetDistance()
+            REQUEST_CODE.SET_TARGETED_TRAINING_TIME -> targetFeatures.targetedTrainingTime
+            REQUEST_CODE.SET_TARGETED_TIME_IN_TWO_HEART_RATE_ZONES -> targetFeatures.targetedTimeInTwoHeartRateZones
+            REQUEST_CODE.SET_TARGETED_TIME_IN_THREE_HEART_RATE_ZONES -> targetFeatures.targetedTimeInThreeHeartRateZones
+            REQUEST_CODE.SET_TARGETED_TIME_IN_FIVE_HEART_RATE_ZONES -> targetFeatures.targetedTimeInFiveHeartRateZones
+            REQUEST_CODE.SET_INDOOR_BIKE_SIMULATION -> targetFeatures.indoorBikeSimulationParameters && supportsIndoorBikeSimulation()
+            REQUEST_CODE.SET_WHEEL_CIRCUMFERENCE -> targetFeatures.wheelCircumference && supportsWheelCircumference()
+            REQUEST_CODE.SPIN_DOWN_CONTROL -> targetFeatures.spinDownControl && supportsSpinDown()
+            REQUEST_CODE.SET_TARGETED_CADENCE -> targetFeatures.targetedCadence && supportsTargetCadence()
+            else -> false
+        }
+    }
+
+    private fun supportsTargetSpeed(): Boolean = machineType in setOf("treadmill", "cross_trainer")
+    private fun supportsTargetInclination(): Boolean = machineType in setOf("treadmill", "cross_trainer")
+    private fun supportsTargetResistance(): Boolean = machineType in setOf("indoor_bike", "rower", "cross_trainer")
+    private fun supportsTargetPower(): Boolean = machineType in setOf("indoor_bike", "treadmill", "rower", "cross_trainer")
+    private fun supportsTargetSteps(): Boolean = machineType in setOf("cross_trainer", "step_climber")
+    private fun supportsTargetStrides(): Boolean = machineType in setOf("cross_trainer", "stair_climber")
+    private fun supportsTargetDistance(): Boolean = machineType in setOf("indoor_bike", "treadmill", "rower", "cross_trainer")
+    private fun supportsTargetCadence(): Boolean = machineType in setOf("indoor_bike", "rower", "cross_trainer")
+    private fun supportsIndoorBikeSimulation(): Boolean = machineType == "indoor_bike"
+    private fun supportsWheelCircumference(): Boolean = machineType == "indoor_bike"
+    private fun supportsSpinDown(): Boolean = machineType == "indoor_bike"
+
+    private fun handleReset(value: ByteArray): ControlPointProcedureResult {
+        if (value.size != 1) {
+            return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
+        }
+        clearControlOwner()
+        mainViewModel.fitnessMachineHasBeenStarted.postValue(false)
+        mainViewModel.ftmsIndoorBikeData.resetSession()
+        mainViewModel.ftmsTreadmillData.resetSession()
+        mainViewModel.ftmsRowerData.resetSession()
+        mainViewModel.ftmsCrossTrainerData.resetSession()
+        mainViewModel.ftmsStepClimberData.resetSession()
+        mainViewModel.ftmsStairClimberData.resetSession()
+        mainViewModel.ftmsTargetState.postValue(FtmsTargetState())
+        trainingStatusCharacteristic.setTrainingStatus(TRAINING_STATUS_CODES.IDLE)
+        statusCharacteristic.sendResetStatus()
+        return ControlPointProcedureResult(RESULT_CODE.SUCCESS)
+    }
+
+    private fun handleStartOrResume(value: ByteArray): ControlPointProcedureResult {
+        if (value.size != 1) {
+            return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
+        }
+        mainViewModel.fitnessMachineHasBeenStarted.postValue(true)
+        trainingStatusCharacteristic.setTrainingStatus(TRAINING_STATUS_CODES.MANUAL_MODE)
+        statusCharacteristic.sendStartedOrResumedStatus()
+        return ControlPointProcedureResult(RESULT_CODE.SUCCESS)
+    }
+
+    private fun handleStopOrPause(value: ByteArray): ControlPointProcedureResult {
+        if (value.size != 2 || (value[1].toInt() and 0xFF) !in 1..2) {
+            return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
+        }
+        val isPause = (value[1].toInt() and 0xFF) == 2
+        mainViewModel.fitnessMachineHasBeenStarted.postValue(false)
+        trainingStatusCharacteristic.setTrainingStatus(TRAINING_STATUS_CODES.IDLE)
+        statusCharacteristic.sendStoppedStatus(isPause)
+        return ControlPointProcedureResult(RESULT_CODE.SUCCESS)
+    }
+
+    private fun handleSetTargetSpeed(value: ByteArray): ControlPointProcedureResult {
+        if (value.size != 3) return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
+        val rawSpeed = readUInt16(value, 1)
+        val speedKmh = rawSpeed / 100f
+        val ranges = mainViewModel.ftmsSupportedRanges
+        if (speedKmh < ranges.minSpeedKmh || speedKmh > ranges.maxSpeedKmh) {
+            return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
+        }
+        mainViewModel.ftmsIndoorBikeData.instantaneousSpeed = speedKmh
+        mainViewModel.ftmsTreadmillData.instantaneousSpeed = speedKmh
+        mainViewModel.ftmsCrossTrainerData.instantaneousSpeed = speedKmh
+        mainViewModel.postInstantaneousSpeed(speedKmh)
+        updateTargets { it.copy(speedKmh = speedKmh) }
+        statusCharacteristic.sendTargetSpeedChanged(speedKmh)
+        return ControlPointProcedureResult(RESULT_CODE.SUCCESS)
+    }
+
+    private fun handleSetTargetInclination(value: ByteArray): ControlPointProcedureResult {
+        if (value.size != 3) return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
+        val inclinationPercent = readSInt16(value, 1) / 10f
+        val ranges = mainViewModel.ftmsSupportedRanges
+        if (inclinationPercent < ranges.minInclinationPercent || inclinationPercent > ranges.maxInclinationPercent) {
+            return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
+        }
+        mainViewModel.ftmsTreadmillData.inclinationPercent = inclinationPercent
+        mainViewModel.ftmsCrossTrainerData.inclinationPercent = inclinationPercent
+        mainViewModel.ftmsReceivedTargetInclination.postValue(inclinationPercent.toDouble())
+        updateTargets { it.copy(inclinationPercent = inclinationPercent) }
+        statusCharacteristic.sendTargetInclinationChanged(inclinationPercent.toDouble())
+        return ControlPointProcedureResult(RESULT_CODE.SUCCESS)
+    }
+
+    private fun handleSetTargetResistanceLevel(value: ByteArray): ControlPointProcedureResult {
+        if (value.size != 3) return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
+        val resistanceLevel = readSInt16(value, 1) / 10f
+        val ranges = mainViewModel.ftmsSupportedRanges
+        if (resistanceLevel < ranges.minResistanceLevel || resistanceLevel > ranges.maxResistanceLevel) {
+            return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
+        }
+        mainViewModel.ftmsIndoorBikeData.resistanceLevel = resistanceLevel.toInt()
+        mainViewModel.ftmsRowerData.resistanceLevel = resistanceLevel.toInt()
+        mainViewModel.ftmsCrossTrainerData.resistanceLevel = resistanceLevel.toInt()
+        updateTargets { it.copy(resistanceLevel = resistanceLevel) }
+        statusCharacteristic.sendTargetResistanceLevelChanged(resistanceLevel)
+        return ControlPointProcedureResult(RESULT_CODE.SUCCESS)
+    }
+
+    private fun handleSetTargetPower(value: ByteArray): ControlPointProcedureResult {
+        if (value.size != 3) return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
+        val power = readSInt16(value, 1)
+        val ranges = mainViewModel.ftmsSupportedRanges
+        if (power < ranges.minPowerWatt || power > ranges.maxPowerWatt) {
+            return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
+        }
+        mainViewModel.ftmsIndoorBikeData.instantaneousPower = power
+        mainViewModel.ftmsTreadmillData.instantaneousPower = power
+        mainViewModel.ftmsRowerData.instantaneousPower = power
+        mainViewModel.ftmsCrossTrainerData.instantaneousPower = power
+        mainViewModel.postInstantaneousPower(power)
+        mainViewModel.receivedTargetPowerInControlPoint.postValue(power)
+        updateTargets { it.copy(powerWatt = power) }
+        statusCharacteristic.sendTargetPowerChanged(power)
+        return ControlPointProcedureResult(RESULT_CODE.SUCCESS)
+    }
+
+    private fun handleSetTargetHeartRate(value: ByteArray): ControlPointProcedureResult {
+        if (value.size != 2) return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
+        val heartRate = value[1].toInt() and 0xFF
+        val ranges = mainViewModel.ftmsSupportedRanges
+        if (heartRate < ranges.minHeartRateBpm || heartRate > ranges.maxHeartRateBpm) {
+            return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
+        }
+        mainViewModel.ftmsIndoorBikeData.heartRate = heartRate
+        mainViewModel.ftmsTreadmillData.heartRate = heartRate
+        mainViewModel.ftmsRowerData.heartRate = heartRate
+        mainViewModel.ftmsCrossTrainerData.heartRate = heartRate
+        mainViewModel.ftmsStepClimberData.heartRate = heartRate
+        mainViewModel.ftmsStairClimberData.heartRate = heartRate
+        updateTargets { it.copy(heartRateBpm = heartRate) }
+        statusCharacteristic.sendTargetHeartRateChanged(heartRate)
+        return ControlPointProcedureResult(RESULT_CODE.SUCCESS)
+    }
+
+    private fun handleSetTargetedExpendedEnergy(value: ByteArray): ControlPointProcedureResult {
+        if (value.size != 3) return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
+        val kcal = readUInt16(value, 1)
+        updateTargets { it.copy(expendedEnergyKcal = kcal) }
+        statusCharacteristic.sendTargetedExpendedEnergyChanged(kcal)
+        return ControlPointProcedureResult(RESULT_CODE.SUCCESS)
+    }
+
+    private fun handleSetTargetedNumberOfSteps(value: ByteArray): ControlPointProcedureResult {
+        if (value.size != 3) return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
+        val steps = readUInt16(value, 1)
+        updateTargets { it.copy(steps = steps) }
+        statusCharacteristic.sendTargetedNumberOfStepsChanged(steps)
+        return ControlPointProcedureResult(RESULT_CODE.SUCCESS)
+    }
+
+    private fun handleSetTargetedNumberOfStrides(value: ByteArray): ControlPointProcedureResult {
+        if (value.size != 3) return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
+        val strides = readUInt16(value, 1)
+        updateTargets { it.copy(strides = strides) }
+        statusCharacteristic.sendTargetedNumberOfStridesChanged(strides)
+        return ControlPointProcedureResult(RESULT_CODE.SUCCESS)
+    }
+
+    private fun handleSetTargetedDistance(value: ByteArray): ControlPointProcedureResult {
+        if (value.size != 4) return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
+        val distanceMeters = readUInt24(value, 1)
+        updateTargets { it.copy(distanceMeters = distanceMeters) }
+        statusCharacteristic.sendTargetedDistanceChanged(distanceMeters)
+        return ControlPointProcedureResult(RESULT_CODE.SUCCESS)
+    }
+
+    private fun handleSetTargetedTrainingTime(value: ByteArray): ControlPointProcedureResult {
+        if (value.size != 3) return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
+        val seconds = readUInt16(value, 1)
+        mainViewModel.ftmsIndoorBikeData.targetDurationSeconds = seconds
+        mainViewModel.ftmsTreadmillData.targetDurationSeconds = seconds
+        mainViewModel.ftmsRowerData.targetDurationSeconds = seconds
+        mainViewModel.ftmsCrossTrainerData.targetDurationSeconds = seconds
+        mainViewModel.ftmsStepClimberData.targetDurationSeconds = seconds
+        mainViewModel.ftmsStairClimberData.targetDurationSeconds = seconds
+        updateTargets { it.copy(trainingTimeSeconds = seconds) }
+        statusCharacteristic.sendTargetedTrainingTimeChanged(seconds)
+        return ControlPointProcedureResult(RESULT_CODE.SUCCESS)
+    }
+
+    private fun handleSetTargetedTimeInHeartRateZones(
+        value: ByteArray,
+        zoneCount: Int
+    ): ControlPointProcedureResult {
+        if (value.size != 1 + zoneCount * 2) {
+            return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
+        }
+
+        val seconds = (0 until zoneCount).map { index ->
+            readUInt16(value, 1 + index * 2)
+        }
+        val zoneTargets = FtmsHeartRateZoneTargets(zoneCount, seconds)
+        updateTargets { it.copy(heartRateZoneTargets = zoneTargets) }
+        when (zoneCount) {
+            2 -> statusCharacteristic.sendTargetedTimeInTwoHeartRateZonesChanged(seconds)
+            3 -> statusCharacteristic.sendTargetedTimeInThreeHeartRateZonesChanged(seconds)
+            5 -> statusCharacteristic.sendTargetedTimeInFiveHeartRateZonesChanged(seconds)
+        }
+        return ControlPointProcedureResult(RESULT_CODE.SUCCESS)
+    }
+
+    private fun handleSetIndoorBikeSimulationParameters(value: ByteArray): ControlPointProcedureResult {
+        if (value.size != 7) return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
+        val parameters = IndoorCyclingSimulationParameters(
+            windSpeedMps = readSInt16(value, 1) / 1000f,
+            gradePercent = readSInt16(value, 3) / 100.0,
+            crr = (value[5].toInt() and 0xFF) / 10000f,
+            cw = (value[6].toInt() and 0xFF) / 100f
+        )
+
+        mainViewModel.updateSimulationParameters(
+            parameters.windSpeedMps,
+            parameters.gradePercent,
+            parameters.crr,
+            parameters.cw
+        )
+        mainViewModel.receivedIndoorBikeGrade.postValue(parameters.gradePercent)
+        updateTargets { it.copy(indoorBikeSimulation = parameters) }
+        statusCharacteristic.sendIndoorBikeSimulationParametersChanged(parameters)
+        return ControlPointProcedureResult(RESULT_CODE.SUCCESS)
+    }
+
+    private fun handleSetWheelCircumference(value: ByteArray): ControlPointProcedureResult {
+        if (value.size != 3) return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
+        val rawTenthsMm = readUInt16(value, 1)
+        if (rawTenthsMm == 0) return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
+
+        val circumferenceMm = rawTenthsMm / 10f
+        mainViewModel.postWheelCircumference(rawTenthsMm / 100f)
+        updateTargets { it.copy(wheelCircumferenceMm = circumferenceMm) }
+        statusCharacteristic.sendWheelCircumferenceChanged(rawTenthsMm)
+        return ControlPointProcedureResult(RESULT_CODE.SUCCESS)
+    }
+
+    private fun handleSpinDownControl(value: ByteArray): ControlPointProcedureResult {
+        if (value.size != 2) return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
+        val controlParameter = value[1].toInt() and 0xFF
+        return when (controlParameter) {
+            SPIN_DOWN_START -> handleSpinDownStart()
+            SPIN_DOWN_IGNORE -> {
+                updateTargets {
+                    it.copy(spinDown = FtmsSpinDownTarget(FTMS_SPIN_DOWN_STATUS_REQUESTED, ignored = true))
+                }
+                ControlPointProcedureResult(RESULT_CODE.SUCCESS)
+            }
+            else -> ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
+        }
+    }
+
+    private fun handleSpinDownStart(): ControlPointProcedureResult {
+        val ranges = mainViewModel.ftmsSupportedRanges
+        val lowKmh = ranges.spinDownTargetSpeedLowKmh.coerceIn(ranges.minSpeedKmh, ranges.maxSpeedKmh)
+        val highKmh = ranges.spinDownTargetSpeedHighKmh.coerceIn(lowKmh, ranges.maxSpeedKmh)
+        val writer = FtmsPacketWriter()
+        writer.u16(ranges.speedRaw(lowKmh))
+        writer.u16(ranges.speedRaw(highKmh))
+
+        updateTargets {
+            it.copy(
+                spinDown = FtmsSpinDownTarget(
+                    status = FTMS_SPIN_DOWN_STATUS_REQUESTED,
+                    targetSpeedLowKmh = lowKmh,
+                    targetSpeedHighKmh = highKmh
+                )
+            )
+        }
+        statusCharacteristic.sendSpinDownStatus(FTMS_SPIN_DOWN_STATUS_REQUESTED)
+        return ControlPointProcedureResult(RESULT_CODE.SUCCESS, writer.bytes())
+    }
+
+    private fun handleSetTargetedCadence(value: ByteArray): ControlPointProcedureResult {
+        if (value.size != 3) return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
+        val cadenceRpm = readUInt16(value, 1) / 2f
+        if (cadenceRpm !in 0f..240f) {
+            return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
+        }
+        mainViewModel.ftmsIndoorBikeData.instantaneousCadence = cadenceRpm.toInt()
+        mainViewModel.ftmsRowerData.strokeRate = cadenceRpm.toInt()
+        mainViewModel.ftmsCrossTrainerData.instantaneousStepsPerMinute = cadenceRpm.toInt()
+        mainViewModel.ftmsStepClimberData.stepsPerMinute = cadenceRpm.toInt()
+        mainViewModel.ftmsStairClimberData.stepsPerMinute = cadenceRpm.toInt()
+        mainViewModel.postInstantaneousCadence(cadenceRpm.toInt())
+        updateTargets { it.copy(cadenceRpm = cadenceRpm) }
+        statusCharacteristic.sendTargetedCadenceChanged(cadenceRpm)
+        return ControlPointProcedureResult(RESULT_CODE.SUCCESS)
+    }
+
+    private fun handleRequestControl(device: BluetoothDevice, value: ByteArray): ControlPointProcedureResult {
+        if (value.size != 1) {
+            return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
+        }
+
+        val owner = controlOwner
+        return if (owner == null || owner.address == device.address) {
+            controlOwner = device
+            mainViewModel.controlHasBeenTakenInControlPoint.postValue(true)
+            ControlPointProcedureResult(RESULT_CODE.SUCCESS)
+        } else {
+            ControlPointProcedureResult(RESULT_CODE.CONTROL_NOT_PERMITTED)
+        }
+    }
+
+    private fun updateTargets(update: (FtmsTargetState) -> FtmsTargetState) {
+        val current = mainViewModel.ftmsTargetState.value ?: FtmsTargetState()
+        mainViewModel.ftmsTargetState.postValue(update(current))
+    }
+
+    private fun readUInt16(value: ByteArray, offset: Int): Int {
+        return (value[offset].toInt() and 0xFF) or ((value[offset + 1].toInt() and 0xFF) shl 8)
+    }
+
+    private fun readSInt16(value: ByteArray, offset: Int): Int {
+        return readUInt16(value, offset).toShort().toInt()
+    }
+
+    private fun readUInt24(value: ByteArray, offset: Int): Int {
+        return (value[offset].toInt() and 0xFF) or
+            ((value[offset + 1].toInt() and 0xFF) shl 8) or
+            ((value[offset + 2].toInt() and 0xFF) shl 16)
+    }
+
+    private fun isControlOwner(device: BluetoothDevice): Boolean {
+        return controlOwner?.address == device.address
+    }
+
+    fun onDeviceDisconnected(device: BluetoothDevice) {
+        clientConfigDescriptor.removeDevice(device)
+        if (isControlOwner(device)) {
+            clearControlOwner()
+        }
+    }
+
+    fun clearDevicesAndControl() {
+        clientConfigDescriptor.clearDevices()
+        clearControlOwner()
+    }
+
+    private fun clearControlOwner() {
+        controlOwner = null
+        mainViewModel.controlHasBeenTakenInControlPoint.postValue(false)
+    }
+
+    private fun sendWriteResponse(
+        device: BluetoothDevice,
+        requestId: Int,
+        responseNeeded: Boolean,
+        status: Int
+    ) {
+        if (responseNeeded) {
+            gattProfile.bluetoothGattServer!!.sendResponse(device, requestId, status, 0, null)
+        }
+    }
+
+    private fun sendControlPointResponse(
+        device: BluetoothDevice,
+        requestCode: Int,
+        resultCode: Int,
+        responseParameters: ByteArray
+    ) {
+        gattCharacteristic.value = byteArrayOf(
+            RESPONSE_CODE.toByte(),
+            requestCode.toByte(),
+            resultCode.toByte()
+        ) + responseParameters
+        gattProfile.bluetoothGattServer!!.notifyCharacteristicChanged(device, gattCharacteristic, true)
+    }
 }

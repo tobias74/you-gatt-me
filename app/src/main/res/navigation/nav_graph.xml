@@ -3,7 +3,7 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/nav_graph"
-    app:startDestination="@id/nav_gatt_services">  <!-- Changed this line -->
+    app:startDestination="@id/nav_gatt_services">
 
     <fragment
         android:id="@+id/nav_gatt_services"
@@ -34,7 +34,6 @@
         android:name="de.tobiga.yougattme.ui.CyclingSpeedAndCadenceFragment"
         android:label="Cycling Speed And Cadence"
         tools:layout="@layout/fragment_cycling_speed_and_cadence" />
-
 
     <fragment
         android:id="@+id/nav_about"
@@ -83,7 +82,7 @@
         android:label="Running Speed And Cadence"
         tools:layout="@layout/fragment_running_speed_and_cadence" />
 
-    <!--Global action-->
+    <!-- Global action -->
     <action
         android:id="@+id/open_settings_fragment"
         app:destination="@id/settingsFragment"/>

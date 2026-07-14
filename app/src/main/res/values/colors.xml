@@ -1,10 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="purple_200">#FFBB86FC</color>
-    <color name="purple_500">#FF6200EE</color>
-    <color name="purple_700">#FF3700B3</color>
-    <color name="teal_200">#FF03DAC5</color>
-    <color name="teal_700">#FF018786</color>
+    <color name="simulator_ink">#121712</color>
+    <color name="simulator_ink_muted">#536057</color>
+    <color name="simulator_canvas">#F4F0E8</color>
+    <color name="simulator_panel">#FFF9EE</color>
+    <color name="simulator_panel_alt">#E6F2DF</color>
+    <color name="simulator_line">#D4C8B3</color>
+    <color name="simulator_moss">#496B45</color>
+    <color name="simulator_moss_dark">#263C28</color>
+    <color name="simulator_lime">#B7D86A</color>
+    <color name="simulator_amber">#E2A340</color>
+    <color name="simulator_rust">#A84F32</color>
+    <color name="purple_200">#B7D86A</color>
+    <color name="purple_500">#496B45</color>
+    <color name="purple_700">#263C28</color>
+    <color name="teal_200">#E2A340</color>
+    <color name="teal_700">#496B45</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
 </resources>

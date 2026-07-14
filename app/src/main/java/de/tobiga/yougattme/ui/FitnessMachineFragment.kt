@@ -63,6 +63,12 @@ class FitnessMachineFragment : Fragment() {
                         "Cross Trainer" -> {
                             CrossTrainerFragment.newInstance()
                         }
+                        "Stair Climber" -> {
+                            StairClimberFragment.newInstance()
+                        }
+                        "Step Climber" -> {
+                            StepClimberFragment.newInstance()
+                        }
                         else -> {
                             RowerFragment.newInstance()
                         }

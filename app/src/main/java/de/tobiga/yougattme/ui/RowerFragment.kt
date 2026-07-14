@@ -31,7 +31,7 @@ class RowerFragment : Fragment() {
     override fun onAttach(context: Context) {
         super.onAttach(context)
         appState = ApplicationState.getInstance(context)
-        appState.setFitnessMachineMode("rower")
+        appState.activateFitnessMachineProfile("rower")
         mainViewModel = ViewModelProvider(requireActivity()).get(ApplicationViewModel::class.java)
         rowerData = mainViewModel.ftmsRowerData
     }

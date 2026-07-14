@@ -32,7 +32,7 @@ class TreadmillFragment : Fragment() {
         super.onAttach(context)
         appState = ApplicationState.getInstance(context)
         // Set the mode to treadmill.
-        appState.setFitnessMachineMode("treadmill")
+        appState.activateFitnessMachineProfile("treadmill")
         mainViewModel = ViewModelProvider(requireActivity()).get(ApplicationViewModel::class.java)
         treadmillData = mainViewModel.ftmsTreadmillData
     }
@@ -47,7 +47,6 @@ class TreadmillFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         // Prefill input fields with current values.
         binding.etInstantaneousSpeedInput.setText(treadmillData.instantaneousSpeed.toString())
-        binding.etStepRateInput.setText(treadmillData.instantaneousStepRate.toString())
         binding.etHeartRateInput.setText(treadmillData.heartRate.toString())
 
         // Set initial checkbox state for heart rate.
@@ -65,10 +64,6 @@ class TreadmillFragment : Fragment() {
         setupTextWatcher(binding.etInstantaneousSpeedInput) {
             val value = it.toFloatOrNull() ?: 0f
             treadmillData.instantaneousSpeed = value
-        }
-        setupTextWatcher(binding.etStepRateInput) {
-            val value = it.toIntOrNull() ?: 0
-            treadmillData.instantaneousStepRate = value
         }
         setupTextWatcher(binding.etHeartRateInput) {
             val value = it.toIntOrNull() ?: 0

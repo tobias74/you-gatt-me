@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <data>
+        <variable
+            name="stepClimberData"
+            type="de.tobiga.yougattme.gatt.fitnessmachine.StepClimberData" />
+    </data>
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp"
+            tools:context=".ui.StepClimberFragment">
+
+            <TextView
+                style="?android:attr/textAppearanceMedium"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Step Climber Simulation"
+                android:textStyle="bold" />
+
+            <!-- Simulated Values (Read-Only) -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@{`Floors: ` + stepClimberData.floors}"
+                tools:text="Floors: 10" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@{`Total Steps: ` + stepClimberData.stepCount}"
+                tools:text="Total Steps: 200" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@{`Elapsed Time: ` + stepClimberData.elapsedTime + `s`}"
+                tools:text="Elapsed Time: 120s" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@{`Total Energy: ` + stepClimberData.totalEnergy + ` kcal`}"
+                tools:text="Total Energy: 12 kcal" />
+
+
+            <!-- Configurable Values -->
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:hint="Steps per Minute">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etStepsPerMinuteInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="number"
+                    android:text="@{String.valueOf(stepClimberData.stepsPerMinute)}" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:hint="Energy per Minute (kcal)">
+
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/etEnergyPerMinuteInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="number"
+                    android:text="@{String.valueOf(stepClimberData.energyPerMinute)}" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <!-- Optional Fields -->
+            <TextView
+                style="?android:attr/textAppearanceMedium"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="Include Optional Fields:"
+                android:textStyle="bold" />
+
+            <CheckBox
+                android:id="@+id/cbIncludeStepsPerMinute"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="@{stepClimberData.includeStepsPerMinute}"
+                android:text="Steps Per Minute" />
+
+            <CheckBox
+                android:id="@+id/cbIncludePositiveElevationGain"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="@{stepClimberData.includePositiveElevationGain}"
+                android:text="Positive Elevation Gain" />
+
+            <CheckBox
+                android:id="@+id/cbIncludeExpendedEnergy"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="@{stepClimberData.includeExpendedEnergy}"
+                android:text="Expended Energy" />
+
+            <CheckBox
+                android:id="@+id/cbIncludeHeartRate"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="@{stepClimberData.includeHeartRate}"
+                android:text="Heart Rate" />
+
+            <CheckBox
+                android:id="@+id/cbIncludeElapsedTime"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="@{stepClimberData.includeElapsedTime}"
+                android:text="Elapsed Time" />
+
+        </LinearLayout>
+    </ScrollView>
+</layout>

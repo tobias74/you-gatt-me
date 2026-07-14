@@ -1,24 +1,25 @@
 package de.tobiga.yougattme.gatt.cyclingpower
 
-import android.bluetooth.*
+import android.bluetooth.BluetoothDevice
 import de.tobiga.yougattme.ApplicationViewModel
-import de.tobiga.yougattme.gatt.GattProfile
-import de.tobiga.yougattme.gatt.common.AbstractDataMeasurementCharacteristic
-import de.tobiga.yougattme.gatt.cyclingpower.characteristics.CylcingPowerMeasurementCharacteristic
+import de.tobiga.yougattme.gatt.SingleServiceGattProfile
+import de.tobiga.yougattme.gatt.cyclingpower.characteristics.CyclingPowerMeasurementCharacteristic
 import java.util.*
 
-class CyclingPowerProfile(val profileData: CyclingPowerProfileData) : GattProfile() {
+class CyclingPowerProfile(
+    val profileData: ApplicationViewModel
+) : SingleServiceGattProfile() {
 
-    private var cyclingPowerMeasurementCharacteristic: AbstractDataMeasurementCharacteristic
+    private val cyclingPowerMeasurementCharacteristic: CyclingPowerMeasurementCharacteristic
     val GATT_CYCLING_POWER_SERVICE_UUID: UUID = UUID.fromString("00001818-0000-1000-8000-00805f9b34fb")
 
-    override fun getServiceUUID(): UUID {
-       return GATT_CYCLING_POWER_SERVICE_UUID
+    override fun getServiceUUIDs(): List<UUID> {
+       return listOf(GATT_CYCLING_POWER_SERVICE_UUID)
     }
 
     init {
-        cyclingPowerMeasurementCharacteristic = CylcingPowerMeasurementCharacteristic(this, profileData)
-        activeCharacteristics.add(cyclingPowerMeasurementCharacteristic);
+        cyclingPowerMeasurementCharacteristic = CyclingPowerMeasurementCharacteristic(this, profileData)
+        activeCharacteristics.add(cyclingPowerMeasurementCharacteristic)
     }
 
     override fun clearAllDevices() {
@@ -29,8 +30,8 @@ class CyclingPowerProfile(val profileData: CyclingPowerProfileData) : GattProfil
         cyclingPowerMeasurementCharacteristic.clientConfigDescriptor.registeredDevices.remove(device)
     }
 
-    override fun publishData() {
-        cyclingPowerMeasurementCharacteristic.sendData()
+    override fun triggerPeriodicTimer() {
+        cyclingPowerMeasurementCharacteristic.publishMeasurementData()
     }
 
 

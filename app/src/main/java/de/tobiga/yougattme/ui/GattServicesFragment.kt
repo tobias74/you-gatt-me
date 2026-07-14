@@ -4,6 +4,9 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.os.Bundle
 import android.view.*
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
+import android.widget.Spinner
 import androidx.appcompat.widget.SwitchCompat
 import androidx.fragment.app.Fragment
 import androidx.navigation.fragment.findNavController
@@ -11,6 +14,12 @@ import androidx.preference.PreferenceManager
 import de.tobiga.yougattme.ApplicationState
 import de.tobiga.yougattme.R
 import de.tobiga.yougattme.databinding.FragmentGattServicesBinding
+
+// Data model for a GATT profile definition.
+data class GattProfileDef(
+    val key: String,
+    val fragmentFactory: () -> Fragment
+)
 
 class GattServicesFragment : Fragment() {
 
@@ -23,11 +32,20 @@ class GattServicesFragment : Fragment() {
 
     companion object {
         const val GATT_SERVER_ACTIVATED = "gatt_server_activated"
+        const val LAST_SELECTED_PROFILE = "last_selected_profile"
     }
 
     private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
         // Handle preference changes if needed
     }
+
+    // Define the list of profiles with keys and corresponding fragment factories.
+    private val gattProfiles = listOf(
+        GattProfileDef("fitness_machine") { FitnessMachineFragment() },
+        GattProfileDef("cycling_speed_cadence") { CyclingSpeedAndCadenceFragment() },
+        GattProfileDef("cycling_power") { CyclingPowerFragment() },
+        GattProfileDef("running_speed_cadence") { RunningSpeedAndCadenceFragment() },
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -43,22 +61,57 @@ class GattServicesFragment : Fragment() {
         return binding.root
     }
 
+    // Utility to fetch a string resource by name.
+    private fun getStringResourceByName(name: String): String {
+        val resId = resources.getIdentifier(name, "string", requireContext().packageName)
+        return if (resId != 0) getString(resId) else name
+    }
+
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-
         applicationState = ApplicationState.getInstance(requireContext())
 
-        setupClickListeners()
-        setupSwitches()
+        val spinner: Spinner = binding.profileSpinner
+
+        // Build a list of display labels using our keys.
+        val profileDisplayList = gattProfiles.map {
+            getStringResourceByName("spinner_gatt_profile_${it.key}")
+        }
+
+        val adapter = ArrayAdapter(
+            requireContext(),
+            android.R.layout.simple_spinner_item,
+            profileDisplayList
+        )
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        spinner.adapter = adapter
+
+        // Restore the previously selected profile by key.
+        val savedKey = prefs.getString(LAST_SELECTED_PROFILE, null)
+        val selectedProfileDef = gattProfiles.find { it.key == savedKey }
+        if (selectedProfileDef != null) {
+            val index = gattProfiles.indexOf(selectedProfileDef)
+            spinner.setSelection(index)
+            loadProfileFragment(selectedProfileDef)
+        }
+
+        spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(
+                parent: AdapterView<*>, view: View?, position: Int, id: Long
+            ) {
+                val selectedProfileDef = gattProfiles[position]
+                prefs.edit().putString(LAST_SELECTED_PROFILE, selectedProfileDef.key).apply()
+                loadProfileFragment(selectedProfileDef)
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
     }
 
     override fun onCreateOptionsMenu(menu: Menu, inflater: MenuInflater) {
         inflater.inflate(R.menu.menu_main, menu)
-
         val switchId = menu.findItem(R.id.switchId)
         switchAB = switchId.actionView?.findViewById(R.id.switchAB) as SwitchCompat
         switchAB.isChecked = prefs.getBoolean(GATT_SERVER_ACTIVATED, true)
-
         switchAB.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().apply {
                 putBoolean(GATT_SERVER_ACTIVATED, isChecked)
@@ -84,65 +137,15 @@ class GattServicesFragment : Fragment() {
         prefs.unregisterOnSharedPreferenceChangeListener(listener)
     }
 
-    private fun setupClickListeners() {
-        binding.cardFtms.setOnClickListener {
-            findNavController().navigate(R.id.action_gattServicesFragment_to_fitnessMachineFragment)
-        }
-
-        // New: Navigate to CyclingSpeedAndCadenceFragment
-        binding.cardCsc.setOnClickListener {
-            findNavController().navigate(R.id.action_gattServicesFragment_to_cyclingSpeedAndCadenceFragment)
-        }
-
-        binding.cardPower.setOnClickListener {
-            findNavController().navigate(R.id.action_gattServicesFragment_to_cyclingPowerFragment)
-        }
-
-        binding.cardRsc.setOnClickListener {
-            findNavController().navigate(R.id.action_gattServicesFragment_to_runningSpeedAndCadenceFragment)
-        }
-
-    }
-
-    private fun setupSwitches() {
-        binding.switchFtms.setOnCheckedChangeListener { _, isChecked ->
-            if (isChecked) {
-                applicationState.activateFitnessMachine()
-            } else {
-                applicationState.deactivateFitnessMachine()
-            }
-        }
-
-        binding.switchCsc.setOnCheckedChangeListener { _, isChecked ->
-            if (isChecked) {
-                applicationState.activateCyclingSpeedAndCadence()
-            } else {
-                applicationState.deactivateCyclingSpeedAndCadence()
-            }
-        }
-
-        binding.switchPower.setOnCheckedChangeListener { _, isChecked ->
-            if (isChecked) {
-                applicationState.activateCyclingPower()
-            } else {
-                applicationState.deactivateCyclingPower()
-            }
-        }
-
-        // New: Running Speed and Cadence switch
-        binding.switchRsc.setOnCheckedChangeListener { _, isChecked ->
-            if (isChecked) {
-                applicationState.activateRunningSpeedAndCadence()
-            } else {
-                applicationState.deactivateRunningSpeedAndCadence()
-            }
-        }
+    // Loads the fragment using the fragmentFactory of the selected profile.
+    private fun loadProfileFragment(profileDef: GattProfileDef) {
+        val fragment = profileDef.fragmentFactory()
+        childFragmentManager.beginTransaction()
+            .replace(R.id.profileFragmentContainer, fragment)
+            .commit()
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        // Handle action bar item clicks here. The action bar will
-        // automatically handle clicks on the Home/Up button, so long
-        // as you specify a parent activity in AndroidManifest.xml.
         return when (item.itemId) {
             R.id.action_settings -> {
                 findNavController().navigate(R.id.open_settings_fragment)

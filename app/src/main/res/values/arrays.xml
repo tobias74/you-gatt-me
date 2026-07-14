@@ -14,6 +14,7 @@
         <item>Rower</item>
         <item>Treadmill</item>
         <item>Cross Trainer</item>
+        <item>Stair Climber</item>
     </string-array>
 
     <string-array name="ftms_profile_entries">
@@ -21,6 +22,7 @@
         <item>Indoor Bike</item>
         <item>Treadmill</item>
         <item>Cross Trainer</item>
+        <item>Stair Climber</item>
     </string-array>
 
     <string-array name="fitness_machine_entry_values">
@@ -28,6 +30,8 @@
         <item>Indoor Bike</item>
         <item>Treadmill</item>
         <item>Cross Trainer</item>
+        <item>Stair Climber</item>
+        <item>Step Climber</item>
     </string-array>
 
 </resources>

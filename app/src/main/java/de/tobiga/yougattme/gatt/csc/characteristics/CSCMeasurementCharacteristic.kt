@@ -2,13 +2,15 @@ package de.tobiga.yougattme.gatt.csc.characteristics
 
 import android.bluetooth.BluetoothGattCharacteristic
 import de.tobiga.yougattme.ApplicationViewModel
-import de.tobiga.yougattme.gatt.GattProfile
+import de.tobiga.yougattme.gatt.AbstractGattProfile
 import de.tobiga.yougattme.gatt.common.AbstractDataMeasurementCharacteristic
-import de.tobiga.yougattme.gatt.csc.CyclingSpeedAndCadenceProfileData
 import java.util.*
 import kotlin.experimental.or
 
-class CSCMeasurementCharacteristic(gattProfile: GattProfile, val profileData: CyclingSpeedAndCadenceProfileData) : AbstractDataMeasurementCharacteristic(gattProfile) {
+class CSCMeasurementCharacteristic(
+    gattProfile: AbstractGattProfile,
+    private val profileData: ApplicationViewModel
+) : AbstractDataMeasurementCharacteristic(gattProfile) {
 
     val GATT_CSC_MEASUREMENT_CHARACTERISTIC_UUID: UUID = UUID.fromString("00002A5B-0000-1000-8000-00805f9b34fb")
 
@@ -37,9 +39,9 @@ class CSCMeasurementCharacteristic(gattProfile: GattProfile, val profileData: Cy
     override fun getData(): ByteArray {
 
         val wheelRevBytes = encodeWheelRevolutions(profileData.cumulativeWheelRevolutions.toUInt())
-        val lastWheelEventTimeBytes = encodeEventTime(profileData.lastWheelEventTime.toUInt())
+        val lastWheelEventTimeBytes = encodeEventTime(profileData.lastWheelEventTime)
         val crankRevBytes = encodeCrankRevolutions(profileData.cumulativeCrankRevolutions.toUInt())
-        val lastCrankEventTimeBytes = encodeEventTime(profileData.lastCrankEventTime.toUInt())
+        val lastCrankEventTimeBytes = encodeEventTime(profileData.lastCrankEventTime)
 
         val flags = (BITMASK_CRANK_REV_PRESENT or BITMASK_WHEEL_REV_PRESENT)
         val field = ByteArray(11)
@@ -81,10 +83,13 @@ class CSCMeasurementCharacteristic(gattProfile: GattProfile, val profileData: Cy
         )
     }
 
-    private fun encodeEventTime(eventTime: UInt): ByteArray {
+    private fun encodeEventTime(milliseconds: Long): ByteArray {
+        // Perform the unit conversion here
+        val eventTimeBle = ((milliseconds * 1024) / 1000).toUInt()
+
         return byteArrayOf(
-            (eventTime and 0xFFu).toByte(),
-            ((eventTime shr 8) and 0xFFu).toByte(),
+            (eventTimeBle and 0xFFu).toByte(),
+            ((eventTimeBle shr 8) and 0xFFu).toByte()
         )
     }
 

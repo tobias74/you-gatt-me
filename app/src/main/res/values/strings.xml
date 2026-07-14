@@ -67,4 +67,10 @@
     <string name="ftms_rower_power_present">Instant Power Present</string>
     <string name="ftms_rower_pace_present">Instant Pace Present</string>
 
+
+    <string name="spinner_gatt_profile_fitness_machine">Fitness Machine</string>
+    <string name="spinner_gatt_profile_cycling_speed_cadence">Cycling Speed &amp; Cadence</string>
+    <string name="spinner_gatt_profile_cycling_power">Cycling Power</string>
+    <string name="spinner_gatt_profile_running_speed_cadence">Running Speed &amp; Cadence</string>
+
 </resources>

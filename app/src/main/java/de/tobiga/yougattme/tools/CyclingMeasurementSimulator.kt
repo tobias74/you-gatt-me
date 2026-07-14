@@ -1,6 +1,5 @@
 package de.tobiga.yougattme.tools
 
-import android.util.Log
 import kotlin.math.floor
 
 class CyclingMeasurementSimulator {
@@ -32,7 +31,7 @@ class CyclingMeasurementSimulator {
         cumulativeRevolutions: Double,
         lastEventTimestamp: Long,
         maxRevolutions: Long,
-        currentTimeMillis: Long,
+        currentTimeStamp: Long,
         durationMillis: Long = -1,
         componentName: String
     ): SimulationResult {
@@ -41,7 +40,7 @@ class CyclingMeasurementSimulator {
             return SimulationResult(
                 newPosition = currentPosition,
                 cumulativeRevolutions = cumulativeRevolutions,
-                newTimestamp = currentTimeMillis,
+                newTimestamp = currentTimeStamp,
                 newRevolutions = 0
             )
         }
@@ -58,11 +57,7 @@ class CyclingMeasurementSimulator {
         }
 
         // Determine simulation duration
-        val actualDurationMillis = if (durationMillis > 0) {
-            durationMillis
-        } else {
-            currentTimeMillis - lastEventTimestamp
-        }
+        val actualDurationMillis = currentTimeStamp - lastEventTimestamp
 
         // Calculate rotation progress during this period
         val rotationProgress = revolutionsPerSecond * (actualDurationMillis / 1000.0)
@@ -118,7 +113,7 @@ class CyclingMeasurementSimulator {
             cumulativeRevolutions = cumulativeWheelRevolutions,
             lastEventTimestamp = lastWheelEventTimestamp,
             maxRevolutions = MAX_WHEEL_REVOLUTIONS,
-            currentTimeMillis = currentTimeMillis,
+            currentTimeStamp = currentTimeMillis,
             durationMillis = durationMillis,
             componentName = "wheel"
         )
@@ -141,7 +136,7 @@ class CyclingMeasurementSimulator {
             cumulativeRevolutions = cumulativeCrankRevolutions,
             lastEventTimestamp = lastCrankEventTimestamp,
             maxRevolutions = MAX_CRANK_REVOLUTIONS,
-            currentTimeMillis = currentTimeMillis,
+            currentTimeStamp = currentTimeMillis,
             durationMillis = durationMillis,
             componentName = "crank"
         )
@@ -183,6 +178,7 @@ class CyclingMeasurementSimulator {
         return lastCrankEventTimestamp
     }
 
+    /*
     fun getLastCrankEventTimestampBle(): Int {
         // Convert milliseconds to 1/1024 seconds (wrapping at 65535)
         return ((lastCrankEventTimestamp * 1024) / 1000).toInt() % 65536
@@ -191,6 +187,17 @@ class CyclingMeasurementSimulator {
     fun getLastWheelEventTimestampBle(): Int {
         // Convert milliseconds to 1/1024 seconds (wrapping at 65535)
         return ((lastWheelEventTimestamp * 1024) / 1000).toInt() % 65536
+    }
+
+    */
+
+    // EXPOSE these methods instead:
+    fun getLastCrankEventTimestampMillis(): Long {
+        return lastCrankEventTimestamp
+    }
+
+    fun getLastWheelEventTimestampMillis(): Long {
+        return lastWheelEventTimestamp
     }
 
     fun reset() {

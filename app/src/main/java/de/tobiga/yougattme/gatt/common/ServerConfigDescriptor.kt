@@ -3,11 +3,11 @@ package de.tobiga.yougattme.gatt.common
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattDescriptor
-import de.tobiga.yougattme.gatt.GattProfile
+import de.tobiga.yougattme.gatt.AbstractGattProfile
 import de.tobiga.yougattme.gatt.TobigaGattDescriptor
 import java.util.*
 
-class ServerConfigDescriptor(gattProfile: GattProfile): TobigaGattDescriptor(gattProfile) {
+class ServerConfigDescriptor(gattProfile: AbstractGattProfile): TobigaGattDescriptor(gattProfile) {
     val SERVER_CONFIG_DESCRIPTOR_UUID: UUID = UUID.fromString("00002903-0000-1000-8000-00805f9b34fb")
 
     init {
@@ -15,7 +15,7 @@ class ServerConfigDescriptor(gattProfile: GattProfile): TobigaGattDescriptor(gat
     }
 
     override fun onReadRequest(device: BluetoothDevice, requestId: Int, offset: Int) {
-        gattProfile.bluetoothGattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS,0, null)
+        gattProfile.bluetoothGattServer!!.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS,0, null)
     }
 
     override fun onWriteRequest(

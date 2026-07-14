@@ -53,26 +53,6 @@
                 </com.google.android.material.textfield.TextInputLayout>
             </LinearLayout>
 
-            <!-- Step Rate (Mandatory) -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:paddingBottom="8dp">
-                <com.google.android.material.textfield.TextInputLayout
-                    android:layout_width="0dp"
-                    android:layout_weight="1"
-                    android:layout_height="wrap_content"
-                    android:hint="Step Rate (steps/min)">
-                    <com.google.android.material.textfield.TextInputEditText
-                        android:id="@+id/etStepRateInput"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:inputType="number"/>
-                </com.google.android.material.textfield.TextInputLayout>
-            </LinearLayout>
-
             <!-- Heart Rate (Optional) -->
             <LinearLayout
                 android:layout_width="match_parent"

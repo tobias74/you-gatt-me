@@ -1,13 +1,16 @@
 package de.tobiga.yougattme.gatt.rsc.charateristics
 
 import android.bluetooth.BluetoothGattCharacteristic
-import de.tobiga.yougattme.gatt.GattProfile
+import de.tobiga.yougattme.gatt.AbstractGattProfile
 import de.tobiga.yougattme.gatt.common.AbstractDataMeasurementCharacteristic
 import de.tobiga.yougattme.gatt.rsc.RunningSpeedAndCadenceProfileData
 import java.util.*
 import kotlin.experimental.or
 
-class RSCMeasurementCharacteristic(gattProfile: GattProfile, val profileData: RunningSpeedAndCadenceProfileData) : AbstractDataMeasurementCharacteristic(gattProfile) {
+class RSCMeasurementCharacteristic(
+    gattProfile: AbstractGattProfile,
+    val profileData: RunningSpeedAndCadenceProfileData
+) : AbstractDataMeasurementCharacteristic(gattProfile) {
 
     val GATT_RSC_MEASUREMENT_CHARACTERISTIC_UUID: UUID = UUID.fromString("00002A53-0000-1000-8000-00805f9b34fb")
 

@@ -1,0 +1,35 @@
+<layout xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- This <data> block is what the compiler reads to generate the BR fields -->
+    <data>
+        <variable
+            name="stairClimberData"
+            type="de.tobiga.yougattme.gatt.fitnessmachine.StairClimberData" />
+    </data>
+
+    <!-- A simple layout for the Stair Climber UI -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@{`Floors: ` + stairClimberData.floors}" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@{`Steps/Min: ` + stairClimberData.stepsPerMinute}" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@{`Elapsed Time: ` + stairClimberData.elapsedTime + `s`}" />
+
+        <!-- Add EditTexts and CheckBoxes here to control the data -->
+
+    </LinearLayout>
+</layout>

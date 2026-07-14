@@ -4,11 +4,11 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattDescriptor
 import android.util.Log
-import de.tobiga.yougattme.gatt.GattProfile
+import de.tobiga.yougattme.gatt.AbstractGattProfile
 import de.tobiga.yougattme.gatt.TobigaGattDescriptor
 import java.util.*
 
-class UserDescriptor(val myGattProfile: GattProfile, val description: ByteArray = "tobiga GATT".toByteArray()): TobigaGattDescriptor(myGattProfile) {
+class UserDescriptor(val myGattProfile: AbstractGattProfile, val description: ByteArray = "tobiga GATT".toByteArray()): TobigaGattDescriptor(myGattProfile) {
 
     val USER_DESCRIPTOR: UUID = UUID.fromString("00002901-0000-1000-8000-00805f9b34fb")
 
@@ -17,7 +17,7 @@ class UserDescriptor(val myGattProfile: GattProfile, val description: ByteArray 
     }
 
     override fun onReadRequest(device: BluetoothDevice, requestId: Int, offset: Int) {
-        gattProfile.bluetoothGattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS,0, description)
+        gattProfile.bluetoothGattServer!!.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS,0, description)
 
     }
 

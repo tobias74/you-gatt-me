@@ -1,47 +1,43 @@
-package de.tobiga.yougattme.gatt.fitnessmachine.characteristics
+﻿package de.tobiga.yougattme.gatt.fitnessmachine.characteristics
 
 import android.bluetooth.BluetoothGattCharacteristic
-import android.util.Log
-import de.tobiga.yougattme.gatt.GattProfile
-import de.tobiga.yougattme.gatt.common.AbstractDataMeasurementCharacteristic
+import de.tobiga.yougattme.gatt.AbstractGattProfile
 import de.tobiga.yougattme.gatt.fitnessmachine.CrossTrainerData
-import java.util.*
-import kotlin.experimental.*
+import java.util.UUID
+
+private object CrossTrainerDataFlags {
+    const val AVERAGE_SPEED_PRESENT = 1
+    const val TOTAL_DISTANCE_PRESENT = 2
+    const val STEP_COUNT_PRESENT = 3
+    const val STRIDE_COUNT_PRESENT = 4
+    const val ELEVATION_GAIN_PRESENT = 5
+    const val INCLINATION_AND_RAMP_ANGLE_PRESENT = 6
+    const val RESISTANCE_LEVEL_PRESENT = 7
+    const val INSTANTANEOUS_POWER_PRESENT = 8
+    const val AVERAGE_POWER_PRESENT = 9
+    const val EXPENDED_ENERGY_PRESENT = 10
+    const val HEART_RATE_PRESENT = 11
+    const val METABOLIC_EQUIVALENT_PRESENT = 12
+    const val ELAPSED_TIME_PRESENT = 13
+    const val REMAINING_TIME_PRESENT = 14
+    const val MOVEMENT_DIRECTION_BACKWARD = 15
+}
 
 class CrossTrainerDataCharacteristic(
-    gattProfile: GattProfile,
-    val crossTrainerData: CrossTrainerData
-) : AbstractDataMeasurementCharacteristic(gattProfile) {
+    gattProfile: AbstractGattProfile,
+    private val crossTrainerData: CrossTrainerData
+) : AbstractFitnessMachineDataCharacteristic(gattProfile) {
 
-    // Bitmask flags for the first set of fields.
-    // Note: BITMASK_STEP_COUNT now indicates that step data (instantaneous, average, and total) is included.
-    val BITMASK_STEP_COUNT = (0b00001000).toByte()
-    val BITMASK_STRIDE_COUNT = (0b00010000).toByte()
-    // Bitmask for Average Speed (if needed later)
-    val BITMASK_AVERAGE_SPEED = (0b00000010).toByte()
-    // Bitmask for Total Distance (optional)
-    val BITMASK_TOTAL_DISTANCE = (0b00000100).toByte()
-
-    // Flags for the second set of fields.
-    val BITMASK2_INSTANTANEOUS_POWER =       (0b00000001).toByte()
-    val BITMASK2_AVERAGE_POWER =             (0b00000010).toByte()
-    val BITMASK2_EXPENDED_ENERGY =           (0b00000100).toByte()
-    val BITMASK2_HEART_RATE =                (0b00001000).toByte()
-    val BITMASK2_ELAPSED_TIME =              (0b00100000).toByte()
-    val BITMASK2_REMAINING_TIME =            (0b01000000).toByte()
-
-    val GATT_CROSS_TRAINER_DATA_CHARACTERISTIC_UUID: UUID =
+    private val GATT_CROSS_TRAINER_DATA_CHARACTERISTIC_UUID: UUID =
         UUID.fromString("00002ACE-0000-1000-8000-00805f9b34fb")
 
-    override fun getCharacteristicUUID(): UUID {
-        return GATT_CROSS_TRAINER_DATA_CHARACTERISTIC_UUID
-    }
+    override fun getCharacteristicUUID(): UUID = GATT_CROSS_TRAINER_DATA_CHARACTERISTIC_UUID
 
     init {
         gattCharacteristic = BluetoothGattCharacteristic(
             GATT_CROSS_TRAINER_DATA_CHARACTERISTIC_UUID,
             BluetoothGattCharacteristic.PROPERTY_NOTIFY,
-            BluetoothGattCharacteristic.PERMISSION_READ
+            0
         )
         activeDescriptors.forEach {
             gattCharacteristic.addDescriptor(it.gattDescriptor)
@@ -49,94 +45,80 @@ class CrossTrainerDataCharacteristic(
     }
 
     override fun getData(): ByteArray {
+        val writer = FtmsPacketWriter()
+        writer.u24(buildFlags())
 
-        val field = ByteArray(100)
-        var bitmask1 = (0x00).toByte()
-        var bitmask2 = (0x00).toByte()
+        // More Data is never set in this simulator path, so instantaneous speed is mandatory.
+        writer.u16(crossTrainerData.getInstantaneousSpeedHundredthsKmh())
 
-        // Set flags for the second byte (e.g. instantaneous power, heart rate, elapsed time).
-        if (crossTrainerData.includeInstantaneousPower)
-            bitmask2 = bitmask2 or BITMASK2_INSTANTANEOUS_POWER
-        if (crossTrainerData.includeHeartRate)
-            bitmask2 = bitmask2 or BITMASK2_HEART_RATE
-        if (crossTrainerData.includeElapsedTime)
-            bitmask2 = bitmask2 or BITMASK2_ELAPSED_TIME
-
-        // Set flags for the first byte.
-        if (crossTrainerData.includeTotalDistance)
-            bitmask1 = bitmask1 or BITMASK_TOTAL_DISTANCE
-
-        // Always include step data.
-        bitmask1 = bitmask1 or BITMASK_STEP_COUNT
-        bitmask1 = bitmask1 or BITMASK_STRIDE_COUNT
-
-        field[0] = bitmask1
-        field[1] = bitmask2
-        field[2] = 0.toByte() // Reserved
-
-        var index = 3
-
-        // Field 1: Instantaneous Speed (2 bytes, little-endian)
-        val instSpeed = (crossTrainerData.instantaneousSpeed * 100).toInt()
-        field[index] = (instSpeed and 0xFF).toByte()
-        field[index + 1] = ((instSpeed shr 8) and 0xFF).toByte()
-        index += 2
-
-        // Field 3: Total Distance (3 bytes, little-endian), if enabled.
-        if ((bitmask1 and BITMASK_TOTAL_DISTANCE) != 0.toByte()) {
-            val dist = crossTrainerData.totalDistance
-            field[index] = (dist and 0xFF).toByte()
-            field[index + 1] = ((dist shr 8) and 0xFF).toByte()
-            field[index + 2] = ((dist shr 16) and 0xFF).toByte()
-            index += 3
+        if (crossTrainerData.includeAverageSpeed) {
+            writer.u16(crossTrainerData.getAverageSpeedHundredthsKmh())
         }
-
-
-        // Field 2: Step Data (5 bytes) — in order:
-        // a) Instantaneous Steps Per Minute (1 byte)
-
-        // Instantaneous Steps Per Minute (16 bits)
-        val instSPM = crossTrainerData.instantaneousStepsPerMinute.toInt()
-        field[index] = (instSPM and 0xFF).toByte()
-        field[index + 1] = ((instSPM shr 8) and 0xFF).toByte()
-        index += 2
-
-        // Average Steps Per Minute (16 bits)
-        val avgSPM = crossTrainerData.averageStepsPerMinute.toInt()
-        field[index] = (avgSPM and 0xFF).toByte()
-        field[index + 1] = ((avgSPM shr 8) and 0xFF).toByte()
-        index += 2
-
-
-        // c) Total Step Count (3 bytes, little-endian)
-        val totalSteps = crossTrainerData.totalStepCount
-        field[index] = (totalSteps and 0xFF).toByte()
-        field[index + 1] = ((totalSteps shr 8) and 0xFF).toByte()
-        index += 2
-
-
-        // Field 4: Instantaneous Power (2 bytes, little-endian), if enabled.
+        if (crossTrainerData.includeTotalDistance) {
+            writer.u24(crossTrainerData.getTotalDistanceMeters())
+        }
+        if (crossTrainerData.includeStepCount) {
+            writer.u16(crossTrainerData.getInstantaneousStepRateSpm())
+            writer.u16(crossTrainerData.getAverageStepRateSpm())
+        }
+        if (crossTrainerData.includeStrideCount) {
+            writer.u16(crossTrainerData.getStrideCountTenths())
+        }
+        if (crossTrainerData.includeElevationGain) {
+            writer.u16(crossTrainerData.getPositiveElevationGainMeters())
+            writer.u16(crossTrainerData.getNegativeElevationGainMeters())
+        }
+        if (crossTrainerData.includeInclination) {
+            writer.s16(crossTrainerData.getInclinationTenthsPercent())
+            writer.s16(crossTrainerData.getRampAngleTenthsDegree())
+        }
+        if (crossTrainerData.includeResistanceLevel) {
+            writer.s16(crossTrainerData.getResistanceLevelTenths())
+        }
         if (crossTrainerData.includeInstantaneousPower) {
-            val instPower = crossTrainerData.instantaneousPower
-            field[index] = (instPower and 0xFF).toByte()
-            field[index + 1] = ((instPower shr 8) and 0xFF).toByte()
-            index += 2
+            writer.s16(crossTrainerData.getInstantaneousPowerWatt())
         }
-
-        // Field 5: Heart Rate (1 byte, if enabled)
+        if (crossTrainerData.includeAveragePower) {
+            writer.s16(crossTrainerData.getAveragePowerWatt())
+        }
+        if (crossTrainerData.includeExpendedEnergy) {
+            writer.u16(crossTrainerData.getTotalEnergyKcal())
+            writer.u16(crossTrainerData.getEnergyPerHourKcal())
+            writer.u8(crossTrainerData.getEnergyPerMinuteKcal())
+        }
         if (crossTrainerData.includeHeartRate) {
-            field[index] = crossTrainerData.heartRate.toByte()
-            index++
+            writer.u8(crossTrainerData.getHeartRateBpm())
         }
-
-        // Field 6: Elapsed Time (2 bytes, little-endian, if enabled)
+        if (crossTrainerData.includeMetabolicEquivalent) {
+            writer.u8(crossTrainerData.getMetabolicEquivalentTenths())
+        }
         if (crossTrainerData.includeElapsedTime) {
-            val elapsed = crossTrainerData.elapsedTime.toInt() // assuming elapsedTime is a Float internally
-            field[index] = (elapsed and 0xFF).toByte()
-            field[index + 1] = ((elapsed shr 8) and 0xFF).toByte()
-            index += 2
+            writer.u16(crossTrainerData.getElapsedTimeSeconds())
+        }
+        if (crossTrainerData.includeRemainingTime) {
+            writer.u16(crossTrainerData.getRemainingTimeSeconds())
         }
 
-        return field.copyOf(index)
+        return writer.bytes()
+    }
+
+    private fun buildFlags(): Int {
+        var flags = 0
+        if (crossTrainerData.includeAverageSpeed) flags = flags or (1 shl CrossTrainerDataFlags.AVERAGE_SPEED_PRESENT)
+        if (crossTrainerData.includeTotalDistance) flags = flags or (1 shl CrossTrainerDataFlags.TOTAL_DISTANCE_PRESENT)
+        if (crossTrainerData.includeStepCount) flags = flags or (1 shl CrossTrainerDataFlags.STEP_COUNT_PRESENT)
+        if (crossTrainerData.includeStrideCount) flags = flags or (1 shl CrossTrainerDataFlags.STRIDE_COUNT_PRESENT)
+        if (crossTrainerData.includeElevationGain) flags = flags or (1 shl CrossTrainerDataFlags.ELEVATION_GAIN_PRESENT)
+        if (crossTrainerData.includeInclination) flags = flags or (1 shl CrossTrainerDataFlags.INCLINATION_AND_RAMP_ANGLE_PRESENT)
+        if (crossTrainerData.includeResistanceLevel) flags = flags or (1 shl CrossTrainerDataFlags.RESISTANCE_LEVEL_PRESENT)
+        if (crossTrainerData.includeInstantaneousPower) flags = flags or (1 shl CrossTrainerDataFlags.INSTANTANEOUS_POWER_PRESENT)
+        if (crossTrainerData.includeAveragePower) flags = flags or (1 shl CrossTrainerDataFlags.AVERAGE_POWER_PRESENT)
+        if (crossTrainerData.includeExpendedEnergy) flags = flags or (1 shl CrossTrainerDataFlags.EXPENDED_ENERGY_PRESENT)
+        if (crossTrainerData.includeHeartRate) flags = flags or (1 shl CrossTrainerDataFlags.HEART_RATE_PRESENT)
+        if (crossTrainerData.includeMetabolicEquivalent) flags = flags or (1 shl CrossTrainerDataFlags.METABOLIC_EQUIVALENT_PRESENT)
+        if (crossTrainerData.includeElapsedTime) flags = flags or (1 shl CrossTrainerDataFlags.ELAPSED_TIME_PRESENT)
+        if (crossTrainerData.includeRemainingTime) flags = flags or (1 shl CrossTrainerDataFlags.REMAINING_TIME_PRESENT)
+        if (crossTrainerData.movementDirectionBackward) flags = flags or (1 shl CrossTrainerDataFlags.MOVEMENT_DIRECTION_BACKWARD)
+        return flags
     }
 }
