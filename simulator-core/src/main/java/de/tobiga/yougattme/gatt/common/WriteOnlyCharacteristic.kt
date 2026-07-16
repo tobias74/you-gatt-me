@@ -89,9 +89,15 @@ class WriteOnlyCharacteristic(
      */
     fun notify(device: BluetoothDevice, data: ByteArray) {
         cccd?.takeIf { it.registeredDevices.contains(device) }?.also {
-            gattCharacteristic.value = data
-            gattProfile.bluetoothGattServer
-                ?.notifyCharacteristicChanged(device, gattCharacteristic, false)
+            gattProfile.bluetoothGattServer?.let { server ->
+                GattNotificationDispatcher.enqueue(
+                    server = server,
+                    device = device,
+                    characteristic = gattCharacteristic,
+                    confirm = false,
+                    value = data
+                )
+            }
         }
     }
 }

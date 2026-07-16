@@ -38,57 +38,26 @@ class StairClimberDataCharacteristic(
         }
     }
 
-    override fun getData(): ByteArray {
-        val writer = FtmsPacketWriter()
-        writer.u16(buildFlags())
-
-        // More Data is never set in this simulator path, so floors are mandatory.
-        writer.u16(stairClimberData.floors)
-
-        if (stairClimberData.includeStepsPerMinute) {
-            writer.u16(stairClimberData.getStepsPerMinuteSpm())
+    override fun getFtmsDataRecord(): FtmsDataRecord {
+        val optional = buildList {
+            if (stairClimberData.includeStepsPerMinute) add(ftmsField(StairClimberDataFlags.STEPS_PER_MINUTE_PRESENT) { u16(stairClimberData.getStepsPerMinuteSpm()) })
+            if (stairClimberData.includeAverageStepRate) add(ftmsField(StairClimberDataFlags.AVERAGE_STEP_RATE_PRESENT) { u16(stairClimberData.getAverageStepRateSpm()) })
+            if (stairClimberData.includePositiveElevationGain) add(ftmsField(StairClimberDataFlags.POSITIVE_ELEVATION_GAIN_PRESENT) { u16(stairClimberData.getPositiveElevationGainMeters()) })
+            if (stairClimberData.includeStrideCount) add(ftmsField(StairClimberDataFlags.STRIDE_COUNT_PRESENT) { u16(stairClimberData.strideCount) })
+            if (stairClimberData.includeExpendedEnergy) add(ftmsField(StairClimberDataFlags.EXPENDED_ENERGY_PRESENT) {
+                u16(stairClimberData.getTotalEnergyKcal())
+                u16(stairClimberData.getEnergyPerHourKcal())
+                u8(stairClimberData.getEnergyPerMinuteKcal())
+            })
+            if (stairClimberData.includeHeartRate) add(ftmsField(StairClimberDataFlags.HEART_RATE_PRESENT) { u8(stairClimberData.getHeartRateBpm()) })
+            if (stairClimberData.includeMetabolicEquivalent) add(ftmsField(StairClimberDataFlags.METABOLIC_EQUIVALENT_PRESENT) { u8(stairClimberData.getMetabolicEquivalentTenths()) })
+            if (stairClimberData.includeElapsedTime) add(ftmsField(StairClimberDataFlags.ELAPSED_TIME_PRESENT) { u16(stairClimberData.getElapsedTimeSeconds()) })
+            if (stairClimberData.includeRemainingTime) add(ftmsField(StairClimberDataFlags.REMAINING_TIME_PRESENT) { u16(stairClimberData.getRemainingTimeSeconds()) })
         }
-        if (stairClimberData.includeAverageStepRate) {
-            writer.u16(stairClimberData.getAverageStepRateSpm())
-        }
-        if (stairClimberData.includePositiveElevationGain) {
-            writer.u16(stairClimberData.getPositiveElevationGainMeters())
-        }
-        if (stairClimberData.includeStrideCount) {
-            writer.u16(stairClimberData.strideCount)
-        }
-        if (stairClimberData.includeExpendedEnergy) {
-            writer.u16(stairClimberData.getTotalEnergyKcal())
-            writer.u16(stairClimberData.getEnergyPerHourKcal())
-            writer.u8(stairClimberData.getEnergyPerMinuteKcal())
-        }
-        if (stairClimberData.includeHeartRate) {
-            writer.u8(stairClimberData.getHeartRateBpm())
-        }
-        if (stairClimberData.includeMetabolicEquivalent) {
-            writer.u8(stairClimberData.getMetabolicEquivalentTenths())
-        }
-        if (stairClimberData.includeElapsedTime) {
-            writer.u16(stairClimberData.getElapsedTimeSeconds())
-        }
-        if (stairClimberData.includeRemainingTime) {
-            writer.u16(stairClimberData.getRemainingTimeSeconds())
-        }
-
-        return writer.bytes()
-    }
-
-    private fun buildFlags(): Int {
-        var flags = 0
-        if (stairClimberData.includeStepsPerMinute) flags = flags or (1 shl StairClimberDataFlags.STEPS_PER_MINUTE_PRESENT)
-        if (stairClimberData.includeAverageStepRate) flags = flags or (1 shl StairClimberDataFlags.AVERAGE_STEP_RATE_PRESENT)
-        if (stairClimberData.includePositiveElevationGain) flags = flags or (1 shl StairClimberDataFlags.POSITIVE_ELEVATION_GAIN_PRESENT)
-        if (stairClimberData.includeStrideCount) flags = flags or (1 shl StairClimberDataFlags.STRIDE_COUNT_PRESENT)
-        if (stairClimberData.includeExpendedEnergy) flags = flags or (1 shl StairClimberDataFlags.EXPENDED_ENERGY_PRESENT)
-        if (stairClimberData.includeHeartRate) flags = flags or (1 shl StairClimberDataFlags.HEART_RATE_PRESENT)
-        if (stairClimberData.includeMetabolicEquivalent) flags = flags or (1 shl StairClimberDataFlags.METABOLIC_EQUIVALENT_PRESENT)
-        if (stairClimberData.includeElapsedTime) flags = flags or (1 shl StairClimberDataFlags.ELAPSED_TIME_PRESENT)
-        if (stairClimberData.includeRemainingTime) flags = flags or (1 shl StairClimberDataFlags.REMAINING_TIME_PRESENT)
-        return flags
+        return FtmsDataRecord(
+            flagsWidth = 2,
+            mandatoryFields = ftmsMandatory { u16(stairClimberData.floors) },
+            optionalFields = optional
+        )
     }
 }

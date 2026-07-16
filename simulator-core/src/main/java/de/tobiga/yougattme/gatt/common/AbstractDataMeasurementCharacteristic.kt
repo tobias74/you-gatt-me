@@ -8,39 +8,81 @@ import de.tobiga.yougattme.gatt.BaseGattCharacteristic
 import de.tobiga.yougattme.tools.toHex
 
 abstract class AbstractDataMeasurementCharacteristic(
-    gattProfile: AbstractGattProfile
+    gattProfile: AbstractGattProfile,
+    includeUserDescriptor: Boolean = true
 ) : BaseGattCharacteristic(gattProfile) {
 
     var clientConfigDescriptor: ClientConfigDescriptor
 
     abstract fun getData(): ByteArray
 
+    open fun getNotificationPackets(maxPayloadBytes: Int): List<ByteArray> = listOf(getData())
+
+    open fun getNotificationPacketsForDevice(
+        device: BluetoothDevice,
+        maxPayloadBytes: Int
+    ): List<ByteArray> = getNotificationPackets(maxPayloadBytes)
+
     init {
         clientConfigDescriptor = ClientConfigDescriptor(gattProfile)
         activeDescriptors.add(clientConfigDescriptor)
-        activeDescriptors.add(UserDescriptor(gattProfile))
+        if (includeUserDescriptor) activeDescriptors.add(UserDescriptor(gattProfile))
 
     }
 
-    fun sendData(dataBlock: ByteArray) {
+    open fun sendData(dataBlock: ByteArray, coalesceKey: String? = null) {
+        sendDataToRegisteredDevices(dataBlock, coalesceKey)
+    }
+
+    protected fun sendDataToRegisteredDevices(
+        dataBlock: ByteArray,
+        coalesceKey: String? = null,
+        excludedDeviceAddress: String? = null
+    ) {
 
         if (clientConfigDescriptor.registeredDevices.isEmpty()) {
             Log.w("BLE","No devices registered for data characteristic, not sending out for $this")
             return
         }
-        for (device in clientConfigDescriptor.registeredDevices) {
+        for (device in clientConfigDescriptor.registeredDevices.filterNot { device ->
+            device.address == excludedDeviceAddress
+        }) {
 
             Log.d("BLE","sending data to registered device ${device.address} " + dataBlock.toHex())
 
-            gattCharacteristic.value = dataBlock
-            gattProfile.bluetoothGattServer!!.notifyCharacteristicChanged(device, gattCharacteristic, false)
+            GattNotificationDispatcher.enqueue(
+                server = gattProfile.bluetoothGattServer!!,
+                device = device,
+                characteristic = gattCharacteristic,
+                confirm = false,
+                value = dataBlock,
+                coalesceKey = coalesceKey
+            )
         }
 
     }
 
     fun publishMeasurementData() {
-        val dataBlock = getData()
-        sendData(dataBlock)
+        if (clientConfigDescriptor.registeredDevices.isEmpty()) {
+            return
+        }
+        for (device in clientConfigDescriptor.registeredDevices) {
+            val packets = getNotificationPacketsForDevice(
+                device,
+                gattProfile.getNotificationPayloadSize(device)
+            )
+            packets.forEachIndexed { index, dataBlock ->
+                Log.d("BLE", "sending packet ${index + 1}/${packets.size} to ${device.address} ${dataBlock.toHex()}")
+            }
+            GattNotificationDispatcher.enqueueBatch(
+                server = gattProfile.bluetoothGattServer!!,
+                device = device,
+                characteristic = gattCharacteristic,
+                confirm = false,
+                values = packets,
+                coalesceKey = getCharacteristicUUID().toString()
+            )
+        }
     }
 
     override fun onReadRequest(device: BluetoothDevice, requestId: Int, offset: Int) {

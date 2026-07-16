@@ -60,8 +60,8 @@ class FitnessMachineProfile(
             }
         }
 
-        statusCharacteristic = FitnessMachineStatusCharacteristic(this)
-        trainingStatusCharacteristic = TrainingStatusCharacteristic(this)
+        statusCharacteristic = FitnessMachineStatusCharacteristic(this, mainViewModel)
+        trainingStatusCharacteristic = TrainingStatusCharacteristic(this, mainViewModel)
         if (mainViewModel.ftmsControlPointEnabled) {
             controlPointCharacteristic = FitnessMachineControlPointCharacteristic(
                 this,
@@ -84,17 +84,20 @@ class FitnessMachineProfile(
             return
         }
         val ranges = mainViewModel.ftmsSupportedRanges
-        if (supportsTargetSpeed()) {
+        val declarations = mainViewModel.ftmsTargetFeatureDeclarationsForGatt()
+        if (declarations.targetSpeed && supportsTargetSpeed()) {
             activeCharacteristics.add(SupportedSpeedRangeCharacteristic(this, ranges))
         }
-        if (supportsTargetInclination()) {
+        if (declarations.targetInclination && supportsTargetInclination()) {
             activeCharacteristics.add(SupportedInclinationRangeCharacteristic(this, ranges))
         }
-        if (supportsTargetResistance()) {
+        if (declarations.targetResistanceLevel && supportsTargetResistance()) {
             activeCharacteristics.add(SupportedResistanceLevelRangeCharacteristic(this, ranges))
         }
-        activeCharacteristics.add(SupportedHeartRateRangeCharacteristic(this, ranges))
-        if (supportsTargetPower()) {
+        if (declarations.targetHeartRate) {
+            activeCharacteristics.add(SupportedHeartRateRangeCharacteristic(this, ranges))
+        }
+        if (declarations.targetPower && supportsTargetPower()) {
             activeCharacteristics.add(SupportedPowerRangeCharacteristic(this, ranges))
         }
     }
@@ -114,6 +117,7 @@ class FitnessMachineProfile(
 
 
     override fun clearAllDevices() {
+        clearDeviceMtus()
         dataCharacteristic.clientConfigDescriptor.clearDevices()
         statusCharacteristic.clientConfigDescriptor.clearDevices()
         trainingStatusCharacteristic.clientConfigDescriptor.clearDevices()
@@ -121,6 +125,7 @@ class FitnessMachineProfile(
     }
 
     override fun onDeviceDisconnected(device: BluetoothDevice) {
+        forgetDeviceMtu(device)
         dataCharacteristic.clientConfigDescriptor.removeDevice(device)
         statusCharacteristic.clientConfigDescriptor.removeDevice(device)
         trainingStatusCharacteristic.clientConfigDescriptor.removeDevice(device)
@@ -128,7 +133,17 @@ class FitnessMachineProfile(
     }
 
     override fun triggerPeriodicTimer() {
-        // This remains for the main data characteristic that sends data continuously.
+        val logicalRecord = dataCharacteristic.getData()
+        val previewPayloadBytes = dataCharacteristic.clientConfigDescriptor.registeredDevices
+            .minOfOrNull(::getNotificationPayloadSize)
+            ?: 20
+        mainViewModel.recordFtmsMeasurement(
+            machineType = machineType,
+            characteristicUuid = dataCharacteristic.getCharacteristicUUID().toString(),
+            logicalRecord = logicalRecord,
+            packets = dataCharacteristic.getNotificationPackets(previewPayloadBytes),
+            previewPayloadBytes = previewPayloadBytes
+        )
         dataCharacteristic.publishMeasurementData()
     }
 }

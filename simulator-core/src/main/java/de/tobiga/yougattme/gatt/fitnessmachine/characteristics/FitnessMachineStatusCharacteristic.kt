@@ -3,6 +3,7 @@ package de.tobiga.yougattme.gatt.fitnessmachine.characteristics
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCharacteristic
+import de.tobiga.yougattme.ApplicationViewModel
 import de.tobiga.yougattme.gatt.AbstractGattProfile
 import de.tobiga.yougattme.gatt.common.AbstractDataMeasurementCharacteristic
 import de.tobiga.yougattme.gatt.fitnessmachine.IndoorCyclingSimulationParameters
@@ -39,8 +40,18 @@ object FTMS_STATUS_CODES {
  * It inherits from AbstractDataMeasurementCharacteristic to reuse the notification logic.
  */
 class FitnessMachineStatusCharacteristic(
-    gattProfile: AbstractGattProfile
+    gattProfile: AbstractGattProfile,
+    private val mainViewModel: ApplicationViewModel
 ) : AbstractDataMeasurementCharacteristic(gattProfile) {
+    private data class DeferredStatus(
+        val packet: ByteArray,
+        val coalesceKey: String?,
+        val excludedDeviceAddress: String?
+    )
+
+    private val deferredNotifications = mutableListOf<DeferredStatus>()
+    private var notificationsDeferred = false
+    private var deferredExcludedDeviceAddress: String? = null
     val GATT_FITNESS_MACHINE_STATUS_CHARACTERISTIC_UUID: UUID = UUID.fromString("00002ADA-0000-1000-8000-00805f9b34fb")
 
     override fun getCharacteristicUUID(): UUID {
@@ -144,10 +155,77 @@ class FitnessMachineStatusCharacteristic(
         val resistanceValue = (resistanceLevel * 10f).toInt()
         val packet = byteArrayOf(
             FTMS_STATUS_CODES.TARGET_RESISTANCE_LEVEL_CHANGED.toByte(),
-            (resistanceValue and 0xFF).toByte(),
-            ((resistanceValue shr 8) and 0xFF).toByte()
+            (resistanceValue and 0xFF).toByte()
         )
         sendData(packet)
+    }
+
+    override fun sendData(dataBlock: ByteArray, coalesceKey: String?) {
+        if (notificationsDeferred) {
+            deferredNotifications += DeferredStatus(
+                packet = dataBlock.copyOf(),
+                coalesceKey = coalesceKey,
+                excludedDeviceAddress = deferredExcludedDeviceAddress
+            )
+        } else {
+            recordStatus(dataBlock)
+            super.sendData(dataBlock, coalesceKey)
+        }
+    }
+
+    fun beginDeferredNotifications(excludedDeviceAddress: String? = null) {
+        deferredNotifications.clear()
+        deferredExcludedDeviceAddress = excludedDeviceAddress
+        notificationsDeferred = true
+    }
+
+    fun completeDeferredNotifications() {
+        notificationsDeferred = false
+        val pending = deferredNotifications.toList()
+        deferredNotifications.clear()
+        deferredExcludedDeviceAddress = null
+        pending.forEach { status ->
+            recordStatus(status.packet)
+            sendDataToRegisteredDevices(
+                dataBlock = status.packet,
+                coalesceKey = status.coalesceKey,
+                excludedDeviceAddress = status.excludedDeviceAddress
+            )
+        }
+    }
+
+    fun discardDeferredNotifications() {
+        notificationsDeferred = false
+        deferredExcludedDeviceAddress = null
+        deferredNotifications.clear()
+    }
+
+    private fun recordStatus(packet: ByteArray) {
+        val title = when (packet.firstOrNull()?.toInt()?.and(0xFF)) {
+            FTMS_STATUS_CODES.RESET -> "Reset"
+            FTMS_STATUS_CODES.FITNESS_MACHINE_STOPPED_OR_PAUSED_BY_USER -> "Stopped or paused"
+            FTMS_STATUS_CODES.FITNESS_MACHINE_STARTED_OR_RESUMED_BY_USER -> "Started or resumed"
+            FTMS_STATUS_CODES.TARGET_SPEED_CHANGED -> "Target speed changed"
+            FTMS_STATUS_CODES.TARGET_INCLINE_CHANGED -> "Target inclination changed"
+            FTMS_STATUS_CODES.TARGET_RESISTANCE_LEVEL_CHANGED -> "Target resistance changed"
+            FTMS_STATUS_CODES.TARGET_POWER_CHANGED -> "Target power changed"
+            FTMS_STATUS_CODES.TARGET_HEART_RATE_CHANGED -> "Target heart rate changed"
+            FTMS_STATUS_CODES.TARGETED_EXPENDED_ENERGY_CHANGED -> "Target energy changed"
+            FTMS_STATUS_CODES.TARGETED_NUMBER_OF_STEPS_CHANGED -> "Target steps changed"
+            FTMS_STATUS_CODES.TARGETED_NUMBER_OF_STRIDES_CHANGED -> "Target strides changed"
+            FTMS_STATUS_CODES.TARGETED_DISTANCE_CHANGED -> "Target distance changed"
+            FTMS_STATUS_CODES.TARGETED_TRAINING_TIME_CHANGED -> "Target training time changed"
+            FTMS_STATUS_CODES.TARGETED_TIME_IN_TWO_HR_ZONES_CHANGED -> "Two-zone HR times changed"
+            FTMS_STATUS_CODES.TARGETED_TIME_IN_THREE_HR_ZONES_CHANGED -> "Three-zone HR times changed"
+            FTMS_STATUS_CODES.TARGETED_TIME_IN_FIVE_HR_ZONES_CHANGED -> "Five-zone HR times changed"
+            FTMS_STATUS_CODES.INDOOR_BIKE_SIMULATION_PARAMETERS_CHANGED -> "Bike simulation changed"
+            FTMS_STATUS_CODES.WHEEL_CIRCUMFERENCE_CHANGED -> "Wheel circumference changed"
+            FTMS_STATUS_CODES.SPIN_DOWN_STATUS -> "Spin-down status"
+            FTMS_STATUS_CODES.TARGETED_CADENCE_CHANGED -> "Target cadence changed"
+            FTMS_STATUS_CODES.CONTROL_PERMISSION_LOST -> "Control permission lost"
+            else -> "Fitness Machine Status"
+        }
+        mainViewModel.recordFtmsProtocolEvent("TX", "STATUS", title, packet)
     }
 
     fun sendTargetHeartRateChanged(heartRate: Int) {

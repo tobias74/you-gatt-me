@@ -21,7 +21,7 @@ class RunningSpeedAndCadenceProfileData {
     private val _instantaneousCadence = MutableLiveData<Int>(0)
     val instantaneousCadenceLiveData: LiveData<Int> = _instantaneousCadence
 
-    private val _instantaneousStrideLength = MutableLiveData<Double>(0.0)
+    private val _instantaneousStrideLength = MutableLiveData<Double>(1.1)
     val instantaneousStrideLengthLiveData: LiveData<Double> = _instantaneousStrideLength
 
     // Custom LiveData that reads directly from the state

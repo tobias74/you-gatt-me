@@ -41,72 +41,38 @@ class TreadmillDataCharacteristic(
         }
     }
 
-    override fun getData(): ByteArray {
-        val writer = FtmsPacketWriter()
-        writer.u16(buildFlags())
-
-        // More Data is never set in this simulator path, so instantaneous speed is mandatory.
-        writer.u16(treadmillData.getInstantaneousSpeedHundredthsKmh())
-
-        if (treadmillData.includeAverageSpeed) {
-            writer.u16(treadmillData.getAverageSpeedHundredthsKmh())
+    override fun getFtmsDataRecord(): FtmsDataRecord {
+        val optional = buildList {
+            if (treadmillData.includeAverageSpeed) add(ftmsField(TreadmillDataFlags.AVERAGE_SPEED_PRESENT) { u16(treadmillData.getAverageSpeedHundredthsKmh()) })
+            if (treadmillData.includeTotalDistance) add(ftmsField(TreadmillDataFlags.TOTAL_DISTANCE_PRESENT) { u24(treadmillData.getTotalDistanceMeters()) })
+            if (treadmillData.includeInclination) add(ftmsField(TreadmillDataFlags.INCLINATION_AND_RAMP_ANGLE_PRESENT) {
+                s16(treadmillData.getInclinationTenthsPercent())
+                s16(treadmillData.getRampAngleTenthsDegree())
+            })
+            if (treadmillData.includeElevationGain) add(ftmsField(TreadmillDataFlags.ELEVATION_GAIN_PRESENT) {
+                u16(treadmillData.getPositiveElevationGainTenthsMeters())
+                u16(treadmillData.getNegativeElevationGainTenthsMeters())
+            })
+            if (treadmillData.includeInstantaneousPace) add(ftmsField(TreadmillDataFlags.INSTANTANEOUS_PACE_PRESENT) { u16(treadmillData.getInstantaneousPaceSeconds()) })
+            if (treadmillData.includeAveragePace) add(ftmsField(TreadmillDataFlags.AVERAGE_PACE_PRESENT) { u16(treadmillData.getAveragePaceSeconds()) })
+            if (treadmillData.includeExpendedEnergy) add(ftmsField(TreadmillDataFlags.EXPENDED_ENERGY_PRESENT) {
+                u16(treadmillData.getTotalEnergyKcal())
+                u16(treadmillData.getEnergyPerHourKcal())
+                u8(treadmillData.getEnergyPerMinuteKcal())
+            })
+            if (treadmillData.includeHeartRate) add(ftmsField(TreadmillDataFlags.HEART_RATE_PRESENT) { u8(treadmillData.getHeartRateBpm()) })
+            if (treadmillData.includeMetabolicEquivalent) add(ftmsField(TreadmillDataFlags.METABOLIC_EQUIVALENT_PRESENT) { u8(treadmillData.getMetabolicEquivalentTenths()) })
+            if (treadmillData.includeElapsedTime) add(ftmsField(TreadmillDataFlags.ELAPSED_TIME_PRESENT) { u16(treadmillData.getElapsedTimeSeconds()) })
+            if (treadmillData.includeRemainingTime) add(ftmsField(TreadmillDataFlags.REMAINING_TIME_PRESENT) { u16(treadmillData.getRemainingTimeSeconds()) })
+            if (treadmillData.includeForceOnBeltAndPowerOutput) add(ftmsField(TreadmillDataFlags.FORCE_ON_BELT_AND_POWER_OUTPUT_PRESENT) {
+                s16(treadmillData.getForceOnBeltNewton())
+                s16(treadmillData.getPowerOutputWatt())
+            })
         }
-        if (treadmillData.includeTotalDistance) {
-            writer.u24(treadmillData.getTotalDistanceMeters())
-        }
-        if (treadmillData.includeInclination) {
-            writer.s16(treadmillData.getInclinationTenthsPercent())
-            writer.s16(treadmillData.getRampAngleTenthsDegree())
-        }
-        if (treadmillData.includeElevationGain) {
-            writer.u16(treadmillData.getPositiveElevationGainTenthsMeters())
-            writer.u16(treadmillData.getNegativeElevationGainTenthsMeters())
-        }
-        if (treadmillData.includeInstantaneousPace) {
-            writer.u8(treadmillData.getInstantaneousPaceKmpmTenths())
-        }
-        if (treadmillData.includeAveragePace) {
-            writer.u8(treadmillData.getAveragePaceKmpmTenths())
-        }
-        if (treadmillData.includeExpendedEnergy) {
-            writer.u16(treadmillData.getTotalEnergyKcal())
-            writer.u16(treadmillData.getEnergyPerHourKcal())
-            writer.u8(treadmillData.getEnergyPerMinuteKcal())
-        }
-        if (treadmillData.includeHeartRate) {
-            writer.u8(treadmillData.getHeartRateBpm())
-        }
-        if (treadmillData.includeMetabolicEquivalent) {
-            writer.u8(treadmillData.getMetabolicEquivalentTenths())
-        }
-        if (treadmillData.includeElapsedTime) {
-            writer.u16(treadmillData.getElapsedTimeSeconds())
-        }
-        if (treadmillData.includeRemainingTime) {
-            writer.u16(treadmillData.getRemainingTimeSeconds())
-        }
-        if (treadmillData.includeForceOnBeltAndPowerOutput) {
-            writer.s16(treadmillData.getForceOnBeltNewton())
-            writer.s16(treadmillData.getPowerOutputWatt())
-        }
-
-        return writer.bytes()
-    }
-
-    private fun buildFlags(): Int {
-        var flags = 0
-        if (treadmillData.includeAverageSpeed) flags = flags or (1 shl TreadmillDataFlags.AVERAGE_SPEED_PRESENT)
-        if (treadmillData.includeTotalDistance) flags = flags or (1 shl TreadmillDataFlags.TOTAL_DISTANCE_PRESENT)
-        if (treadmillData.includeInclination) flags = flags or (1 shl TreadmillDataFlags.INCLINATION_AND_RAMP_ANGLE_PRESENT)
-        if (treadmillData.includeElevationGain) flags = flags or (1 shl TreadmillDataFlags.ELEVATION_GAIN_PRESENT)
-        if (treadmillData.includeInstantaneousPace) flags = flags or (1 shl TreadmillDataFlags.INSTANTANEOUS_PACE_PRESENT)
-        if (treadmillData.includeAveragePace) flags = flags or (1 shl TreadmillDataFlags.AVERAGE_PACE_PRESENT)
-        if (treadmillData.includeExpendedEnergy) flags = flags or (1 shl TreadmillDataFlags.EXPENDED_ENERGY_PRESENT)
-        if (treadmillData.includeHeartRate) flags = flags or (1 shl TreadmillDataFlags.HEART_RATE_PRESENT)
-        if (treadmillData.includeMetabolicEquivalent) flags = flags or (1 shl TreadmillDataFlags.METABOLIC_EQUIVALENT_PRESENT)
-        if (treadmillData.includeElapsedTime) flags = flags or (1 shl TreadmillDataFlags.ELAPSED_TIME_PRESENT)
-        if (treadmillData.includeRemainingTime) flags = flags or (1 shl TreadmillDataFlags.REMAINING_TIME_PRESENT)
-        if (treadmillData.includeForceOnBeltAndPowerOutput) flags = flags or (1 shl TreadmillDataFlags.FORCE_ON_BELT_AND_POWER_OUTPUT_PRESENT)
-        return flags
+        return FtmsDataRecord(
+            flagsWidth = 2,
+            mandatoryFields = ftmsMandatory { u16(treadmillData.getInstantaneousSpeedHundredthsKmh()) },
+            optionalFields = optional
+        )
     }
 }

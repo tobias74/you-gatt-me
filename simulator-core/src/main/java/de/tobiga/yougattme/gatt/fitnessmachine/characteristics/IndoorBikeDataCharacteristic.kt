@@ -44,114 +44,29 @@ class IndoorBikeDataCharacteristic(
         }
     }
 
-    override fun getData(): ByteArray {
-        val data = mutableListOf<Byte>()
-        val flags = buildFlags()
-
-        writeUInt16(data, flags)
-
-        // More Data is never set in this simulator path, so instantaneous speed is mandatory.
-        writeUInt16(data, indoorBikeData.getInstantaneousSpeedHundredthsKmh())
-
-        if (indoorBikeData.includeAverageSpeed) {
-            writeUInt16(data, indoorBikeData.getAverageSpeedHundredthsKmh())
+    override fun getFtmsDataRecord(): FtmsDataRecord {
+        val optional = buildList {
+            if (indoorBikeData.includeAverageSpeed) add(ftmsField(IndoorBikeDataFlags.AVERAGE_SPEED_PRESENT) { u16(indoorBikeData.getAverageSpeedHundredthsKmh()) })
+            if (indoorBikeData.includeInstantaneousCadence) add(ftmsField(IndoorBikeDataFlags.INSTANTANEOUS_CADENCE_PRESENT) { u16(indoorBikeData.getInstantaneousCadenceHalfRpm()) })
+            if (indoorBikeData.includeAverageCadence) add(ftmsField(IndoorBikeDataFlags.AVERAGE_CADENCE_PRESENT) { u16(indoorBikeData.getAverageCadenceHalfRpm()) })
+            if (indoorBikeData.includeTotalDistance) add(ftmsField(IndoorBikeDataFlags.TOTAL_DISTANCE_PRESENT) { u24(indoorBikeData.getTotalDistanceInt()) })
+            if (indoorBikeData.includeResistanceLevel) add(ftmsField(IndoorBikeDataFlags.RESISTANCE_LEVEL_PRESENT) { u8(indoorBikeData.getResistanceLevelRaw()) })
+            if (indoorBikeData.includeInstantaneousPower) add(ftmsField(IndoorBikeDataFlags.INSTANTANEOUS_POWER_PRESENT) { s16(indoorBikeData.getInstantaneousPowerRaw()) })
+            if (indoorBikeData.includeAveragePower) add(ftmsField(IndoorBikeDataFlags.AVERAGE_POWER_PRESENT) { s16(indoorBikeData.getAveragePowerRaw()) })
+            if (indoorBikeData.includeExpendedEnergy) add(ftmsField(IndoorBikeDataFlags.EXPENDED_ENERGY_PRESENT) {
+                u16(indoorBikeData.getTotalEnergyKcal())
+                u16(indoorBikeData.getEnergyPerHourKcal())
+                u8(indoorBikeData.getEnergyPerMinuteKcal())
+            })
+            if (indoorBikeData.includeHeartRate) add(ftmsField(IndoorBikeDataFlags.HEART_RATE_PRESENT) { u8(indoorBikeData.getHeartRateBpm()) })
+            if (indoorBikeData.includeMetabolicEquivalent) add(ftmsField(IndoorBikeDataFlags.METABOLIC_EQUIVALENT_PRESENT) { u8(indoorBikeData.getMetabolicEquivalentTenths()) })
+            if (indoorBikeData.includeElapsedTime) add(ftmsField(IndoorBikeDataFlags.ELAPSED_TIME_PRESENT) { u16(indoorBikeData.getElapsedTimeInt()) })
+            if (indoorBikeData.includeRemainingTime) add(ftmsField(IndoorBikeDataFlags.REMAINING_TIME_PRESENT) { u16(indoorBikeData.getRemainingTimeInt()) })
         }
-        if (indoorBikeData.includeInstantaneousCadence) {
-            writeUInt16(data, indoorBikeData.getInstantaneousCadenceHalfRpm())
-        }
-        if (indoorBikeData.includeAverageCadence) {
-            writeUInt16(data, indoorBikeData.getAverageCadenceHalfRpm())
-        }
-        if (indoorBikeData.includeTotalDistance) {
-            writeUInt24(data, indoorBikeData.getTotalDistanceInt())
-        }
-        if (indoorBikeData.includeResistanceLevel) {
-            writeSInt16(data, indoorBikeData.getResistanceLevelRaw())
-        }
-        if (indoorBikeData.includeInstantaneousPower) {
-            writeSInt16(data, indoorBikeData.getInstantaneousPowerRaw())
-        }
-        if (indoorBikeData.includeAveragePower) {
-            writeSInt16(data, indoorBikeData.getAveragePowerRaw())
-        }
-        if (indoorBikeData.includeExpendedEnergy) {
-            writeUInt16(data, indoorBikeData.getTotalEnergyKcal())
-            writeUInt16(data, indoorBikeData.getEnergyPerHourKcal())
-            writeUInt8(data, indoorBikeData.getEnergyPerMinuteKcal())
-        }
-        if (indoorBikeData.includeHeartRate) {
-            writeUInt8(data, indoorBikeData.getHeartRateBpm())
-        }
-        if (indoorBikeData.includeMetabolicEquivalent) {
-            writeUInt8(data, indoorBikeData.getMetabolicEquivalentTenths())
-        }
-        if (indoorBikeData.includeElapsedTime) {
-            writeUInt16(data, indoorBikeData.getElapsedTimeInt())
-        }
-        if (indoorBikeData.includeRemainingTime) {
-            writeUInt16(data, indoorBikeData.getRemainingTimeInt())
-        }
-
-        return data.toByteArray()
-    }
-
-    private fun buildFlags(): Int {
-        var flags = 0
-        if (indoorBikeData.includeAverageSpeed) {
-            flags = flags or (1 shl IndoorBikeDataFlags.AVERAGE_SPEED_PRESENT)
-        }
-        if (indoorBikeData.includeInstantaneousCadence) {
-            flags = flags or (1 shl IndoorBikeDataFlags.INSTANTANEOUS_CADENCE_PRESENT)
-        }
-        if (indoorBikeData.includeAverageCadence) {
-            flags = flags or (1 shl IndoorBikeDataFlags.AVERAGE_CADENCE_PRESENT)
-        }
-        if (indoorBikeData.includeTotalDistance) {
-            flags = flags or (1 shl IndoorBikeDataFlags.TOTAL_DISTANCE_PRESENT)
-        }
-        if (indoorBikeData.includeResistanceLevel) {
-            flags = flags or (1 shl IndoorBikeDataFlags.RESISTANCE_LEVEL_PRESENT)
-        }
-        if (indoorBikeData.includeInstantaneousPower) {
-            flags = flags or (1 shl IndoorBikeDataFlags.INSTANTANEOUS_POWER_PRESENT)
-        }
-        if (indoorBikeData.includeAveragePower) {
-            flags = flags or (1 shl IndoorBikeDataFlags.AVERAGE_POWER_PRESENT)
-        }
-        if (indoorBikeData.includeExpendedEnergy) {
-            flags = flags or (1 shl IndoorBikeDataFlags.EXPENDED_ENERGY_PRESENT)
-        }
-        if (indoorBikeData.includeHeartRate) {
-            flags = flags or (1 shl IndoorBikeDataFlags.HEART_RATE_PRESENT)
-        }
-        if (indoorBikeData.includeMetabolicEquivalent) {
-            flags = flags or (1 shl IndoorBikeDataFlags.METABOLIC_EQUIVALENT_PRESENT)
-        }
-        if (indoorBikeData.includeElapsedTime) {
-            flags = flags or (1 shl IndoorBikeDataFlags.ELAPSED_TIME_PRESENT)
-        }
-        if (indoorBikeData.includeRemainingTime) {
-            flags = flags or (1 shl IndoorBikeDataFlags.REMAINING_TIME_PRESENT)
-        }
-        return flags
-    }
-
-    private fun writeUInt8(data: MutableList<Byte>, value: Int) {
-        data.add((value and 0xFF).toByte())
-    }
-
-    private fun writeUInt16(data: MutableList<Byte>, value: Int) {
-        data.add((value and 0xFF).toByte())
-        data.add(((value shr 8) and 0xFF).toByte())
-    }
-
-    private fun writeSInt16(data: MutableList<Byte>, value: Int) {
-        writeUInt16(data, value)
-    }
-
-    private fun writeUInt24(data: MutableList<Byte>, value: Int) {
-        data.add((value and 0xFF).toByte())
-        data.add(((value shr 8) and 0xFF).toByte())
-        data.add(((value shr 16) and 0xFF).toByte())
+        return FtmsDataRecord(
+            flagsWidth = 2,
+            mandatoryFields = ftmsMandatory { u16(indoorBikeData.getInstantaneousSpeedHundredthsKmh()) },
+            optionalFields = optional
+        )
     }
 }

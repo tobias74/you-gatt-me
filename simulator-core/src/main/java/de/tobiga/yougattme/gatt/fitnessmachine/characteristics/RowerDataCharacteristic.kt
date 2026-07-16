@@ -41,70 +41,32 @@ class RowerDataCharacteristic(
         }
     }
 
-    override fun getData(): ByteArray {
-        val writer = FtmsPacketWriter()
-        writer.u16(buildFlags())
-
-        // More Data is never set in this simulator path, so stroke rate/count are mandatory.
-        writer.u8(rowerData.getStrokeRateHalfSpm())
-        writer.u16(rowerData.getStrokeCountTotal())
-
-        if (rowerData.includeAverageStrokeRate) {
-            writer.u8(rowerData.getAverageStrokeRateHalfSpm())
+    override fun getFtmsDataRecord(): FtmsDataRecord {
+        val optional = buildList {
+            if (rowerData.includeAverageStrokeRate) add(ftmsField(RowerDataFlags.AVERAGE_STROKE_RATE_PRESENT) { u8(rowerData.getAverageStrokeRateHalfSpm()) })
+            if (rowerData.includeTotalDistance) add(ftmsField(RowerDataFlags.TOTAL_DISTANCE_PRESENT) { u24(rowerData.getTotalDistanceMeters()) })
+            if (rowerData.includeInstantaneousPace) add(ftmsField(RowerDataFlags.INSTANTANEOUS_PACE_PRESENT) { u16(rowerData.getInstantaneousPaceSeconds()) })
+            if (rowerData.includeAveragePace) add(ftmsField(RowerDataFlags.AVERAGE_PACE_PRESENT) { u16(rowerData.getAveragePaceSeconds()) })
+            if (rowerData.includeInstantaneousPower) add(ftmsField(RowerDataFlags.INSTANTANEOUS_POWER_PRESENT) { s16(rowerData.getInstantaneousPowerWatt()) })
+            if (rowerData.includeAveragePower) add(ftmsField(RowerDataFlags.AVERAGE_POWER_PRESENT) { s16(rowerData.getAveragePowerWatt()) })
+            if (rowerData.includeResistanceLevel) add(ftmsField(RowerDataFlags.RESISTANCE_LEVEL_PRESENT) { u8(rowerData.getResistanceLevelRaw()) })
+            if (rowerData.includeExpendedEnergy) add(ftmsField(RowerDataFlags.EXPENDED_ENERGY_PRESENT) {
+                u16(rowerData.getTotalEnergyKcal())
+                u16(rowerData.getEnergyPerHourKcal())
+                u8(rowerData.getEnergyPerMinuteKcal())
+            })
+            if (rowerData.includeHeartRate) add(ftmsField(RowerDataFlags.HEART_RATE_PRESENT) { u8(rowerData.getHeartRateBpm()) })
+            if (rowerData.includeMetabolicEquivalent) add(ftmsField(RowerDataFlags.METABOLIC_EQUIVALENT_PRESENT) { u8(rowerData.getMetabolicEquivalentTenths()) })
+            if (rowerData.includeElapsedTime) add(ftmsField(RowerDataFlags.ELAPSED_TIME_PRESENT) { u16(rowerData.getElapsedTimeSeconds()) })
+            if (rowerData.includeRemainingTime) add(ftmsField(RowerDataFlags.REMAINING_TIME_PRESENT) { u16(rowerData.getRemainingTimeSeconds()) })
         }
-        if (rowerData.includeTotalDistance) {
-            writer.u24(rowerData.getTotalDistanceMeters())
-        }
-        if (rowerData.includeInstantaneousPace) {
-            writer.u16(rowerData.getInstantaneousPaceSeconds())
-        }
-        if (rowerData.includeAveragePace) {
-            writer.u16(rowerData.getAveragePaceSeconds())
-        }
-        if (rowerData.includeInstantaneousPower) {
-            writer.s16(rowerData.getInstantaneousPowerWatt())
-        }
-        if (rowerData.includeAveragePower) {
-            writer.s16(rowerData.getAveragePowerWatt())
-        }
-        if (rowerData.includeResistanceLevel) {
-            writer.s16(rowerData.getResistanceLevelRaw())
-        }
-        if (rowerData.includeExpendedEnergy) {
-            writer.u16(rowerData.getTotalEnergyKcal())
-            writer.u16(rowerData.getEnergyPerHourKcal())
-            writer.u8(rowerData.getEnergyPerMinuteKcal())
-        }
-        if (rowerData.includeHeartRate) {
-            writer.u8(rowerData.getHeartRateBpm())
-        }
-        if (rowerData.includeMetabolicEquivalent) {
-            writer.u8(rowerData.getMetabolicEquivalentTenths())
-        }
-        if (rowerData.includeElapsedTime) {
-            writer.u16(rowerData.getElapsedTimeSeconds())
-        }
-        if (rowerData.includeRemainingTime) {
-            writer.u16(rowerData.getRemainingTimeSeconds())
-        }
-
-        return writer.bytes()
-    }
-
-    private fun buildFlags(): Int {
-        var flags = 0
-        if (rowerData.includeAverageStrokeRate) flags = flags or (1 shl RowerDataFlags.AVERAGE_STROKE_RATE_PRESENT)
-        if (rowerData.includeTotalDistance) flags = flags or (1 shl RowerDataFlags.TOTAL_DISTANCE_PRESENT)
-        if (rowerData.includeInstantaneousPace) flags = flags or (1 shl RowerDataFlags.INSTANTANEOUS_PACE_PRESENT)
-        if (rowerData.includeAveragePace) flags = flags or (1 shl RowerDataFlags.AVERAGE_PACE_PRESENT)
-        if (rowerData.includeInstantaneousPower) flags = flags or (1 shl RowerDataFlags.INSTANTANEOUS_POWER_PRESENT)
-        if (rowerData.includeAveragePower) flags = flags or (1 shl RowerDataFlags.AVERAGE_POWER_PRESENT)
-        if (rowerData.includeResistanceLevel) flags = flags or (1 shl RowerDataFlags.RESISTANCE_LEVEL_PRESENT)
-        if (rowerData.includeExpendedEnergy) flags = flags or (1 shl RowerDataFlags.EXPENDED_ENERGY_PRESENT)
-        if (rowerData.includeHeartRate) flags = flags or (1 shl RowerDataFlags.HEART_RATE_PRESENT)
-        if (rowerData.includeMetabolicEquivalent) flags = flags or (1 shl RowerDataFlags.METABOLIC_EQUIVALENT_PRESENT)
-        if (rowerData.includeElapsedTime) flags = flags or (1 shl RowerDataFlags.ELAPSED_TIME_PRESENT)
-        if (rowerData.includeRemainingTime) flags = flags or (1 shl RowerDataFlags.REMAINING_TIME_PRESENT)
-        return flags
+        return FtmsDataRecord(
+            flagsWidth = 2,
+            mandatoryFields = ftmsMandatory {
+                u8(rowerData.getStrokeRateHalfSpm())
+                u16(rowerData.getStrokeCountTotal())
+            },
+            optionalFields = optional
+        )
     }
 }

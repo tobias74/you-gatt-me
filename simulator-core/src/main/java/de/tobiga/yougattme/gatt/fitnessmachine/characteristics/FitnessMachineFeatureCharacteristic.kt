@@ -194,6 +194,7 @@ class FitnessMachineFeatureCharacteristic(
         val data = mainViewModel.ftmsRowerData
         val featureBits = mutableListOf<Int>()
 
+        if (data.includeAverageStrokeRate) featureBits.add(FitnessMachineFeatureBits.CADENCE)
         if (data.includeTotalDistance) featureBits.add(FitnessMachineFeatureBits.TOTAL_DISTANCE)
         if (data.includeInstantaneousPace || data.includeAveragePace) featureBits.add(FitnessMachineFeatureBits.PACE)
         if (data.includeResistanceLevel) featureBits.add(FitnessMachineFeatureBits.RESISTANCE_LEVEL)

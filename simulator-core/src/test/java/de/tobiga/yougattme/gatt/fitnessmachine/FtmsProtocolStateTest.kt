@@ -1,6 +1,7 @@
 package de.tobiga.yougattme.gatt.fitnessmachine
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -13,6 +14,16 @@ class FtmsProtocolStateTest {
         assertEquals(1234, ranges.speedRaw(12.34f))
         assertEquals(-55, ranges.inclinationRaw(-5.5f))
         assertEquals(205, ranges.resistanceRaw(20.5f))
+    }
+
+    @Test
+    fun supportedRanges_rejectValuesThatDoNotMatchAdvertisedIncrement() {
+        val ranges = FtmsSupportedRanges(speedIncrementKmh = 0.5f, powerIncrementWatt = 5)
+
+        assertTrue(ranges.supportsSpeedRaw(2_500))
+        assertFalse(ranges.supportsSpeedRaw(2_501))
+        assertTrue(ranges.supportsPower(250))
+        assertFalse(ranges.supportsPower(252))
     }
 
     @Test
@@ -59,7 +70,7 @@ class FtmsProtocolStateTest {
         val summary = state.summary()
 
         assertTrue(summary.contains("HR zones 3 60s/120s/180s"))
-        assertTrue(summary.contains("bike sim grade 3.5%"))
+        assertTrue(summary.contains("bike sim wind 1.2 m/s, grade 3.5%, Crr 0.0040, Cw 0.50"))
         assertTrue(summary.contains("wheel 2100.0 mm"))
         assertTrue(summary.contains("spin-down requested 20.0-25.0 km/h"))
     }

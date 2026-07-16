@@ -95,7 +95,7 @@ class StandardGattProfileProvider : GattProfileProvider {
             "ftms_stair" -> FitnessMachineProfile("stair_climber", viewModel)
             "csc" -> CyclingSpeedAndCadenceProfile(viewModel)
             "cycling_power" -> CyclingPowerProfile(viewModel)
-            "rsc" -> RunningSpeedAndCadenceProfile(viewModel.runningSpeedAndCadenceData)
+            "rsc" -> RunningSpeedAndCadenceProfile(viewModel)
             else -> null
         }
     }

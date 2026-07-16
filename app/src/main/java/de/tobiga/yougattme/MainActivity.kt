@@ -4,19 +4,25 @@ import android.Manifest
 import android.bluetooth.BluetoothManager
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.res.ColorStateList
 import android.content.pm.PackageManager
 import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.text.TextUtils
 import android.view.View
-import android.widget.TextView
+import android.view.ViewGroup
+import android.widget.AbsListView
 import android.webkit.WebView
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
-import android.widget.GridLayout
+import android.widget.BaseExpandableListAdapter
+import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.Spinner
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -24,18 +30,29 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.preference.PreferenceManager
-import com.google.android.material.button.MaterialButton
 import com.google.android.material.switchmaterial.SwitchMaterial
 import de.tobiga.yougattme.Constants.GATT_SERVER_ACTIVATED
 import de.tobiga.yougattme.databinding.ActivityMainBinding
 import de.tobiga.yougattme.gatt.AbstractGattProfile
+import de.tobiga.yougattme.gatt.common.SensorLocationValues
+import de.tobiga.yougattme.gatt.common.SensorMeasurementSnapshot
+import de.tobiga.yougattme.gatt.common.SensorProtocolEvent
+import de.tobiga.yougattme.gatt.csc.CscControlPointOpCodes
+import de.tobiga.yougattme.gatt.csc.CscFeatureBits
+import de.tobiga.yougattme.gatt.cyclingpower.CyclingPowerControlPointOpCodes
+import de.tobiga.yougattme.gatt.cyclingpower.CyclingPowerFeatureBits
 import de.tobiga.yougattme.gatt.fitnessmachine.FtmsTargetState
+import de.tobiga.yougattme.gatt.fitnessmachine.FtmsMeasurementSnapshot
+import de.tobiga.yougattme.gatt.fitnessmachine.FtmsProtocolEvent
+import de.tobiga.yougattme.gatt.fitnessmachine.summary
 import de.tobiga.yougattme.gatt.provider.GattProfileDefinition
 import de.tobiga.yougattme.gatt.provider.GattProfileProvider
 import de.tobiga.yougattme.gatt.provider.GattProfileProviderLoader
 import de.tobiga.yougattme.gatt.provider.ProfileDependencies
 import de.tobiga.yougattme.gatt.provider.ProfileSelectionMode
 import de.tobiga.yougattme.gatt.provider.StandardGattProfileProvider
+import de.tobiga.yougattme.gatt.rsc.RscFeatureBits
+import de.tobiga.yougattme.gatt.rsc.ScControlPointOpCodes
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -78,21 +95,38 @@ class MainActivity : AppCompatActivity() {
         val label: String
     )
 
+    private data class ExclusiveProfileGroup(
+        val groupKey: String,
+        val profiles: List<GattProfileDefinition>
+    )
+
+    private data class ServiceProfileRow(
+        val key: String,
+        val title: String,
+        val subtitle: String,
+        val contentView: View,
+        val isEnabled: () -> Boolean,
+        val summary: () -> String,
+        val setEnabled: (Boolean) -> Unit,
+        val toggleVisible: Boolean = true
+    )
+
     private lateinit var prefs: SharedPreferences
     private lateinit var binding: ActivityMainBinding
     private lateinit var cameraExecutor: ExecutorService
     private lateinit var applicationState: ApplicationState
+    private lateinit var serviceProfileAdapter: ServiceProfileAdapter
     private val viewModel: ApplicationViewModel by viewModels()
     private val logLines = ArrayDeque<String>()
     private val renderedFieldToggles = mutableListOf<RenderedFieldToggle>()
     private var ftmsEnabled = true
     private var selectedFtmsProfileKey = "ftms_bike"
     private val selectedOptionalServiceKeys = linkedSetOf("csc", "cycling_power")
+    private val selectedExclusiveProfileKeys = mutableMapOf<String, String>()
     private var suppressRuntimeSwitchCallback = false
     private var suppressFieldToggleCallback = false
     private var gattRuntimeStatus = GattRuntimeStatus("Disabled")
     private var renderedMachineFieldKey: String? = null
-    private val extensionProfileButtons = linkedMapOf<String, MaterialButton>()
     private val uiHandler = Handler(Looper.getMainLooper())
     private val indoorBikeSummaryRefresh = object : Runnable {
         override fun run() {
@@ -135,15 +169,6 @@ class MainActivity : AppCompatActivity() {
         FtmsMachineOption("ftms_stair", "Stair Climber")
     )
 
-    private val profileButtons by lazy {
-        mapOf(
-            "ftms" to binding.buttonFtms,
-            "csc" to binding.buttonCsc,
-            "cycling_power" to binding.buttonCyclingPower,
-            "rsc" to binding.buttonRsc
-        )
-    }
-
     private val requestPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
             if (permissions.values.all { it }) {
@@ -169,10 +194,11 @@ class MainActivity : AppCompatActivity() {
         setupRuntimeActions()
         setupProfileActions()
         setupSimulationControls()
+        setupSensorProtocolControls()
         setupDeviceStateObservers()
         updateDeviceStatePanel()
         updateProfileButtons()
-        updateSimulationValuesFromControls()
+        updateSimulationValuesFromControls(updateFtmsDuration = true)
         renderMachineFieldControls()
         updateRuntimeState()
         appendLog("Console initialized")
@@ -246,18 +272,1113 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupProfileActions() {
-        profileButtons.forEach { (key, button) ->
-            button.setOnClickListener {
-                if (key == "ftms") {
-                    ftmsEnabled = !ftmsEnabled
-                    applySelectedServiceStack(rebuildGatt = true, logChange = true)
-                } else {
-                    profiles[key]?.let { toggleProfile(it) }
+        setupServiceProfileList()
+        setupFtmsMachineDropdown()
+    }
+
+    private fun setupServiceProfileList() {
+        val standardServiceKeys = setOf("csc", "cycling_power", "rsc")
+        val ftmsMachineKeys = ftmsMachineOptions.map { option -> option.profileKey }.toSet()
+        val extensionProfiles = profiles.values
+            .filter { profile -> profile.key !in standardServiceKeys }
+            .filter { profile -> profile.key !in ftmsMachineKeys }
+        val exclusiveGroups = extensionProfiles
+            .groupBy { profile -> profile.exclusiveGroup }
+            .filter { (groupKey, groupProfiles) -> groupKey != null && groupProfiles.size > 1 }
+            .map { (groupKey, groupProfiles) ->
+                ExclusiveProfileGroup(
+                    groupKey = groupKey.orEmpty(),
+                    profiles = groupProfiles.sortedBy { profile -> profile.title }
+                )
+            }
+            .sortedBy { group -> exclusiveGroupTitle(group.groupKey) }
+        val groupedExtensionKeys = exclusiveGroups
+            .flatMap { group -> group.profiles.map { profile -> profile.key } }
+            .toSet()
+        val extensionRows = exclusiveGroups.map { group -> exclusiveProfileGroupRow(group) } +
+            extensionProfiles
+                .filter { profile -> profile.key !in groupedExtensionKeys }
+                .sortedBy { profile -> profile.title }
+                .map { profile -> extensionProfileRow(profile) }
+
+        val rows = listOf(
+            ServiceProfileRow(
+                key = "ftms",
+                title = "FTMS",
+                subtitle = "Fitness Machine Service. Choose exactly one equipment type inside this panel.",
+                contentView = prepareServiceContent(binding.layoutFtmsLiveData),
+                isEnabled = { ftmsEnabled },
+                summary = { ftmsSummary() },
+                setEnabled = { enabled -> setFtmsServiceEnabled(enabled) }
+            ),
+            ServiceProfileRow(
+                key = "csc",
+                title = "CSC",
+                subtitle = profiles["csc"]?.subtitle ?: "Cycling Speed and Cadence simulation.",
+                contentView = prepareServiceContent(binding.layoutCscLiveData),
+                isEnabled = { selectedOptionalServiceKeys.contains("csc") },
+                summary = { cscSummary() },
+                setEnabled = { enabled -> setOptionalServiceEnabled("csc", enabled) }
+            ),
+            ServiceProfileRow(
+                key = "cycling_power",
+                title = "Cycling Power",
+                subtitle = profiles["cycling_power"]?.subtitle ?: "Cycling Power Measurement simulation.",
+                contentView = prepareServiceContent(binding.layoutCyclingPowerLiveData),
+                isEnabled = { selectedOptionalServiceKeys.contains("cycling_power") },
+                summary = { cyclingPowerSummary() },
+                setEnabled = { enabled -> setOptionalServiceEnabled("cycling_power", enabled) }
+            ),
+            ServiceProfileRow(
+                key = "rsc",
+                title = "RSC",
+                subtitle = profiles["rsc"]?.subtitle ?: "Running Speed and Cadence simulation.",
+                contentView = prepareServiceContent(binding.layoutRscLiveData),
+                isEnabled = { selectedOptionalServiceKeys.contains("rsc") },
+                summary = { rscSummary() },
+                setEnabled = { enabled -> setOptionalServiceEnabled("rsc", enabled) }
+            )
+        ) + extensionRows
+
+        serviceProfileAdapter = ServiceProfileAdapter(rows)
+        binding.listServiceProfiles.apply {
+            setAdapter(serviceProfileAdapter)
+            setGroupIndicator(null)
+            divider = null
+            setChildDivider(null)
+            setOnGroupExpandListener { expandedGroup ->
+                for (groupIndex in 0 until serviceProfileAdapter.groupCount) {
+                    if (groupIndex != expandedGroup && isGroupExpanded(groupIndex)) {
+                        collapseGroup(groupIndex)
+                    }
                 }
+                refreshServiceProfileListHeight()
+            }
+            setOnGroupCollapseListener { refreshServiceProfileListHeight() }
+            post { refreshServiceProfileListHeight() }
+        }
+    }
+
+    private fun prepareServiceContent(container: LinearLayout): LinearLayout {
+        (container.parent as? ViewGroup)?.removeView(container)
+        container.setPadding(dp(18), dp(18), dp(18), dp(22))
+        container.setBackgroundResource(R.drawable.simulator_accordion_body)
+        container.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        )
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = AbsListView.LayoutParams(
+                AbsListView.LayoutParams.MATCH_PARENT,
+                AbsListView.LayoutParams.WRAP_CONTENT
+            )
+            addView(container)
+            addView(View(this@MainActivity).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    dp(18)
+                )
+            })
+        }
+    }
+
+    private fun exclusiveProfileGroupRow(group: ExclusiveProfileGroup): ServiceProfileRow {
+        val groupKeys = group.profiles.map { profile -> profile.key }.toSet()
+        selectedExclusiveProfileKeys.putIfAbsent(
+            group.groupKey,
+            selectedOptionalServiceKeys.firstOrNull { key -> key in groupKeys } ?: group.profiles.first().key
+        )
+
+        return ServiceProfileRow(
+            key = "exclusive:${group.groupKey}",
+            title = exclusiveGroupTitle(group.groupKey),
+            subtitle = "Select exactly one profile from this mutually exclusive group.",
+            contentView = prepareServiceContent(createExclusiveProfileGroupContent(group)),
+            isEnabled = { selectedOptionalServiceKeys.any { key -> key in groupKeys } },
+            summary = {
+                val profile = selectedProfileForExclusiveGroup(group)
+                val state = if (selectedOptionalServiceKeys.any { key -> key in groupKeys }) "On" else "Off"
+                "$state | ${profile.title} | ${profile.serviceUuid}"
+            },
+            setEnabled = { enabled -> setExclusiveProfileGroupEnabled(group, enabled) }
+        )
+    }
+
+    private fun createExclusiveProfileGroupContent(group: ExclusiveProfileGroup): LinearLayout {
+        val description = TextView(this).apply {
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.simulator_ink_muted))
+            textSize = 14f
+        }
+        val service = TextView(this).apply {
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.simulator_ink_muted))
+            textSize = 13f
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).also { params -> params.topMargin = dp(4) }
+        }
+        val spinner = Spinner(this).apply {
+            adapter = ArrayAdapter(
+                this@MainActivity,
+                android.R.layout.simple_spinner_item,
+                group.profiles.map { profile -> profile.title }
+            ).also { adapter ->
+                adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            }
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(52)
+            ).also { params -> params.topMargin = dp(8) }
+        }
+
+        fun bind(profile: GattProfileDefinition) {
+            description.text = profile.subtitle
+            service.text = "Service: ${profile.serviceUuid}"
+        }
+
+        val selectedProfile = selectedProfileForExclusiveGroup(group)
+        bind(selectedProfile)
+        spinner.setSelection(group.profiles.indexOf(selectedProfile).coerceAtLeast(0), false)
+        spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val profile = group.profiles.getOrNull(position) ?: return
+                bind(profile)
+                selectExclusiveProfileInGroup(group, profile)
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(14), dp(18), dp(18))
+            layoutParams = AbsListView.LayoutParams(
+                AbsListView.LayoutParams.MATCH_PARENT,
+                AbsListView.LayoutParams.WRAP_CONTENT
+            )
+
+            addSectionLabel(this, "PROFILE SELECTOR")
+            addView(spinner)
+            addDivider(this)
+            addView(description)
+            addView(service)
+            addDivider(this)
+            addView(TextView(this@MainActivity).apply {
+                text = "Only one profile in this group can be active at a time."
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.simulator_ink_muted))
+                textSize = 13f
+            })
+        }
+    }
+
+    private fun addSectionLabel(container: LinearLayout, label: String) {
+        container.addView(TextView(this).apply {
+            text = label
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.simulator_moss))
+            textSize = 13f
+            letterSpacing = 0.08f
+            setTypeface(typeface, Typeface.BOLD)
+            isAllCaps = true
+        })
+    }
+
+    private fun addDivider(container: LinearLayout) {
+        container.addView(View(this).apply {
+            setBackgroundColor(ContextCompat.getColor(this@MainActivity, R.color.simulator_line))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                1
+            ).also { params ->
+                params.topMargin = dp(16)
+                params.bottomMargin = dp(14)
+            }
+        })
+    }
+
+    private fun setupSensorProtocolControls() {
+        renderRscProtocolControls()
+        renderCscProtocolControls()
+        renderCyclingPowerProtocolControls()
+    }
+
+    private fun renderRscProtocolControls() {
+        val container = binding.layoutRscProtocolControls
+        val configuration = viewModel.rscConfiguration
+        container.removeAllViews()
+
+        addProtocolSection(container, "DECLARED RSC FEATURE · 0x${configuration.featureBitsForGatt().toString(16).uppercase().padStart(4, '0')}")
+        addProtocolSwitch(
+            container,
+            "Mirror actual support into Feature bits",
+            configuration.mirrorActualIntoFeature
+        ) { enabled ->
+            configuration.mirrorActualIntoFeature = enabled
+            onSensorProtocolConfigurationChanged("rsc")
+        }
+        listOf(
+            RscFeatureBits.STRIDE_LENGTH to "Bit 0 · Instantaneous Stride Length",
+            RscFeatureBits.TOTAL_DISTANCE to "Bit 1 · Total Distance",
+            RscFeatureBits.WALKING_OR_RUNNING to "Bit 2 · Walking/Running Status",
+            RscFeatureBits.CALIBRATION to "Bit 3 · Sensor Calibration",
+            RscFeatureBits.MULTIPLE_LOCATIONS to "Bit 4 · Multiple Sensor Locations"
+        ).forEach { (bit, label) ->
+            addDeclaredFeatureSwitch(
+                container,
+                label,
+                configuration.declaredFeatureBits and bit != 0,
+                !configuration.mirrorActualIntoFeature
+            ) { enabled ->
+                configuration.declaredFeatureBits = configuration.declaredFeatureBits.withBit(bit, enabled)
+                onSensorProtocolConfigurationChanged("rsc")
             }
         }
-        setupFtmsMachineDropdown()
-        renderExtensionProfileButtons()
+
+        addProtocolDivider(container)
+        addProtocolSection(container, "ACTUAL CHARACTERISTICS & MEASUREMENT")
+        addProtocolSwitch(container, "Feature characteristic supports Indicate", configuration.featureIndicationsEnabled) {
+            configuration.featureIndicationsEnabled = it
+            onSensorProtocolConfigurationChanged("rsc")
+        }
+        addProtocolSwitch(container, "Sensor Location characteristic present", configuration.sensorLocationCharacteristicEnabled) {
+            configuration.sensorLocationCharacteristicEnabled = it
+            onSensorProtocolConfigurationChanged("rsc")
+        }
+        addProtocolSwitch(container, "SC Control Point characteristic present", configuration.controlPointCharacteristicEnabled) {
+            configuration.controlPointCharacteristicEnabled = it
+            onSensorProtocolConfigurationChanged("rsc")
+        }
+        addProtocolSwitch(container, "Measurement field · Stride Length", configuration.includeStrideLength) {
+            configuration.includeStrideLength = it
+            onSensorProtocolConfigurationChanged("rsc")
+        }
+        addProtocolSwitch(container, "Measurement field · Total Distance", configuration.includeTotalDistance) {
+            configuration.includeTotalDistance = it
+            onSensorProtocolConfigurationChanged("rsc")
+        }
+        addProtocolSwitch(container, "Measurement flag · Walking/Running Status", configuration.includeWalkingOrRunningStatus) {
+            configuration.includeWalkingOrRunningStatus = it
+            onSensorProtocolConfigurationChanged("rsc")
+        }
+        addProtocolSwitch(container, "Status value · Running (off = walking)", configuration.runningStatus) {
+            configuration.runningStatus = it
+            onSensorProtocolConfigurationChanged("rsc", rebuildGatt = false)
+        }
+        addSensorLocationSpinner(container, "Current Sensor Location", configuration.sensorLocation) { location ->
+            configuration.sensorLocation = location
+            onSensorProtocolConfigurationChanged("rsc", rebuildGatt = false)
+        }
+
+        addProtocolDivider(container)
+        addProtocolSection(container, "ACTUAL SC CONTROL POINT PROCEDURES")
+        addProcedureSwitch(container, configuration.supportedProcedures, ScControlPointOpCodes.SET_CUMULATIVE_VALUE, "0x01 · Set Cumulative Value", "rsc")
+        addProcedureSwitch(container, configuration.supportedProcedures, ScControlPointOpCodes.START_SENSOR_CALIBRATION, "0x02 · Start Sensor Calibration", "rsc")
+        addProcedureSwitch(container, configuration.supportedProcedures, ScControlPointOpCodes.UPDATE_SENSOR_LOCATION, "0x03 · Update Sensor Location", "rsc")
+        addProcedureSwitch(container, configuration.supportedProcedures, ScControlPointOpCodes.REQUEST_SUPPORTED_SENSOR_LOCATIONS, "0x04 · Request Supported Sensor Locations", "rsc")
+        addSupportedLocationControls(container, configuration.supportedSensorLocations, "rsc")
+    }
+
+    private fun renderCscProtocolControls() {
+        val container = binding.layoutCscProtocolControls
+        val configuration = viewModel.cscConfiguration
+        container.removeAllViews()
+
+        addProtocolSection(container, "DECLARED CSC FEATURE · 0x${configuration.featureBitsForGatt().toString(16).uppercase().padStart(4, '0')}")
+        addProtocolSwitch(
+            container,
+            "Mirror actual support into Feature bits",
+            configuration.mirrorActualIntoFeature
+        ) { enabled ->
+            configuration.mirrorActualIntoFeature = enabled
+            onSensorProtocolConfigurationChanged("csc")
+        }
+        listOf(
+            CscFeatureBits.WHEEL_REVOLUTION_DATA to "Bit 0 · Wheel Revolution Data",
+            CscFeatureBits.CRANK_REVOLUTION_DATA to "Bit 1 · Crank Revolution Data",
+            CscFeatureBits.MULTIPLE_LOCATIONS to "Bit 2 · Multiple Sensor Locations"
+        ).forEach { (bit, label) ->
+            addDeclaredFeatureSwitch(
+                container,
+                label,
+                configuration.declaredFeatureBits and bit != 0,
+                !configuration.mirrorActualIntoFeature
+            ) { enabled ->
+                configuration.declaredFeatureBits = configuration.declaredFeatureBits.withBit(bit, enabled)
+                onSensorProtocolConfigurationChanged("csc")
+            }
+        }
+
+        addProtocolDivider(container)
+        addProtocolSection(container, "ACTUAL CHARACTERISTICS & MEASUREMENT")
+        addProtocolSwitch(container, "Feature characteristic supports Indicate", configuration.featureIndicationsEnabled) {
+            configuration.featureIndicationsEnabled = it
+            onSensorProtocolConfigurationChanged("csc")
+        }
+        addProtocolSwitch(container, "Sensor Location characteristic present", configuration.sensorLocationCharacteristicEnabled) {
+            configuration.sensorLocationCharacteristicEnabled = it
+            onSensorProtocolConfigurationChanged("csc")
+        }
+        addProtocolSwitch(container, "SC Control Point characteristic present", configuration.controlPointCharacteristicEnabled) {
+            configuration.controlPointCharacteristicEnabled = it
+            onSensorProtocolConfigurationChanged("csc")
+        }
+        addProtocolSwitch(container, "Measurement pair · Wheel Revolution Data", configuration.includeWheelRevolutionData) {
+            configuration.includeWheelRevolutionData = it
+            onSensorProtocolConfigurationChanged("csc")
+        }
+        addProtocolSwitch(container, "Measurement pair · Crank Revolution Data", configuration.includeCrankRevolutionData) {
+            configuration.includeCrankRevolutionData = it
+            onSensorProtocolConfigurationChanged("csc")
+        }
+        addSensorLocationSpinner(container, "Current Sensor Location", configuration.sensorLocation) { location ->
+            configuration.sensorLocation = location
+            onSensorProtocolConfigurationChanged("csc", rebuildGatt = false)
+        }
+
+        addProtocolDivider(container)
+        addProtocolSection(container, "ACTUAL SC CONTROL POINT PROCEDURES")
+        addProcedureSwitch(container, configuration.supportedProcedures, CscControlPointOpCodes.SET_CUMULATIVE_VALUE, "0x01 · Set Cumulative Value", "csc")
+        addProcedureSwitch(container, configuration.supportedProcedures, CscControlPointOpCodes.UPDATE_SENSOR_LOCATION, "0x03 · Update Sensor Location", "csc")
+        addProcedureSwitch(container, configuration.supportedProcedures, CscControlPointOpCodes.REQUEST_SUPPORTED_SENSOR_LOCATIONS, "0x04 · Request Supported Sensor Locations", "csc")
+        addSupportedLocationControls(container, configuration.supportedSensorLocations, "csc")
+    }
+
+    private fun renderCyclingPowerProtocolControls() {
+        val container = binding.layoutCyclingPowerProtocolControls
+        val configuration = viewModel.cyclingPowerConfiguration
+        container.removeAllViews()
+
+        addProtocolSection(
+            container,
+            "DECLARED CYCLING POWER FEATURE · 0x${configuration.featureBitsForGatt().toUInt().toString(16).uppercase().padStart(8, '0')}"
+        )
+        addProtocolSwitch(
+            container,
+            "Mirror actual support into Feature bits",
+            configuration.mirrorActualIntoFeature
+        ) { enabled ->
+            configuration.mirrorActualIntoFeature = enabled
+            onSensorProtocolConfigurationChanged("cycling_power")
+        }
+        val declaredBits = listOf(
+            0 to "Pedal Power Balance",
+            1 to "Accumulated Torque",
+            2 to "Wheel Revolution Data",
+            3 to "Crank Revolution Data",
+            4 to "Extreme Magnitudes",
+            5 to "Extreme Angles",
+            6 to "Top/Bottom Dead Spot Angles",
+            7 to "Accumulated Energy",
+            8 to "Offset Compensation Indicator",
+            9 to "Offset Compensation",
+            10 to "Measurement Content Masking",
+            11 to "Multiple Sensor Locations",
+            12 to "Crank Length Adjustment",
+            13 to "Chain Length Adjustment",
+            14 to "Chain Weight Adjustment",
+            15 to "Span Length Adjustment",
+            16 to "Sensor Context · Torque-based",
+            17 to "Instantaneous Measurement Direction",
+            18 to "Factory Calibration Date",
+            19 to "Enhanced Offset Compensation"
+        )
+        declaredBits.forEach { (bitNumber, label) ->
+            val bit = 1 shl bitNumber
+            addDeclaredFeatureSwitch(
+                container,
+                "Bit $bitNumber · $label",
+                configuration.declaredFeatureBits and bit != 0,
+                !configuration.mirrorActualIntoFeature
+            ) { enabled ->
+                configuration.declaredFeatureBits = configuration.declaredFeatureBits.withBit(bit, enabled)
+                onSensorProtocolConfigurationChanged("cycling_power")
+            }
+        }
+        addDistributedSystemSpinner(
+            container,
+            "Bits 20–21 · Declared Distributed System Support",
+            (configuration.declaredFeatureBits ushr 20) and 0x03,
+            enabled = !configuration.mirrorActualIntoFeature
+        ) { selection ->
+            configuration.declaredFeatureBits =
+                (configuration.declaredFeatureBits and (0x03 shl 20).inv()) or (selection shl 20)
+            onSensorProtocolConfigurationChanged("cycling_power")
+        }
+
+        addProtocolDivider(container)
+        addProtocolSection(container, "ACTUAL CHARACTERISTICS")
+        addProtocolSwitch(container, "Feature characteristic supports Indicate", configuration.featureIndicationsEnabled) {
+            configuration.featureIndicationsEnabled = it
+            onSensorProtocolConfigurationChanged("cycling_power")
+        }
+        addProtocolSwitch(container, "Sensor Location characteristic present (mandatory in standard CPS)", configuration.sensorLocationCharacteristicEnabled) {
+            configuration.sensorLocationCharacteristicEnabled = it
+            onSensorProtocolConfigurationChanged("cycling_power")
+        }
+        addProtocolSwitch(container, "Cycling Power Control Point present", configuration.controlPointCharacteristicEnabled) {
+            configuration.controlPointCharacteristicEnabled = it
+            onSensorProtocolConfigurationChanged("cycling_power")
+        }
+        addProtocolSwitch(container, "Cycling Power Vector present", configuration.vectorCharacteristicEnabled) {
+            configuration.vectorCharacteristicEnabled = it
+            onSensorProtocolConfigurationChanged("cycling_power")
+        }
+        addProtocolSwitch(container, "Measurement Broadcast property + SCCD present", configuration.measurementBroadcastPropertyEnabled) {
+            configuration.measurementBroadcastPropertyEnabled = it
+            onSensorProtocolConfigurationChanged("cycling_power")
+        }
+        addSensorLocationSpinner(container, "Current Sensor Location", configuration.sensorLocation) { location ->
+            configuration.sensorLocation = location
+            onSensorProtocolConfigurationChanged("cycling_power", rebuildGatt = false)
+        }
+
+        addProtocolDivider(container)
+        addProtocolSection(container, "ACTUAL MEASUREMENT CONTENT")
+        listOf(
+            "Pedal Power Balance" to Pair({ configuration.includePedalPowerBalance }, { value: Boolean -> configuration.includePedalPowerBalance = value }),
+            "Accumulated Torque" to Pair({ configuration.includeAccumulatedTorque }, { value: Boolean -> configuration.includeAccumulatedTorque = value }),
+            "Wheel Revolution Data" to Pair({ configuration.includeWheelRevolutionData }, { value: Boolean -> configuration.includeWheelRevolutionData = value }),
+            "Crank Revolution Data" to Pair({ configuration.includeCrankRevolutionData }, { value: Boolean -> configuration.includeCrankRevolutionData = value }),
+            "Extreme Magnitudes" to Pair({ configuration.includeExtremeMagnitudes }, { value: Boolean -> configuration.includeExtremeMagnitudes = value }),
+            "Extreme Angles" to Pair({ configuration.includeExtremeAngles }, { value: Boolean -> configuration.includeExtremeAngles = value }),
+            "Top Dead Spot Angle" to Pair({ configuration.includeTopDeadSpotAngle }, { value: Boolean -> configuration.includeTopDeadSpotAngle = value }),
+            "Bottom Dead Spot Angle" to Pair({ configuration.includeBottomDeadSpotAngle }, { value: Boolean -> configuration.includeBottomDeadSpotAngle = value }),
+            "Accumulated Energy" to Pair({ configuration.includeAccumulatedEnergy }, { value: Boolean -> configuration.includeAccumulatedEnergy = value }),
+            "Offset Compensation Indicator support" to Pair({ configuration.offsetCompensationIndicatorSupported }, { value: Boolean -> configuration.offsetCompensationIndicatorSupported = value }),
+            "Offset Compensation Indicator set" to Pair({ configuration.offsetCompensationRequired }, { value: Boolean -> configuration.offsetCompensationRequired = value })
+        ).forEach { (label, accessors) ->
+            addProtocolSwitch(container, "Measurement · $label", accessors.first()) { enabled ->
+                accessors.second(enabled)
+                onSensorProtocolConfigurationChanged("cycling_power", rebuildGatt = false)
+            }
+        }
+        addProtocolSwitch(container, "Context · Torque-based (off = force-based)", configuration.sensorMeasurementContextTorqueBased) {
+            configuration.sensorMeasurementContextTorqueBased = it
+            onSensorProtocolConfigurationChanged("cycling_power", rebuildGatt = false)
+        }
+        addProtocolSwitch(container, "Instantaneous Measurement Direction supported", configuration.instantaneousMeasurementDirectionSupported) {
+            configuration.instantaneousMeasurementDirectionSupported = it
+            onSensorProtocolConfigurationChanged("cycling_power", rebuildGatt = false)
+        }
+        addDistributedSystemSpinner(container, "Actual Distributed System Support", configuration.distributedSystemSupport, enabled = true) {
+            configuration.distributedSystemSupport = it
+            onSensorProtocolConfigurationChanged("cycling_power", rebuildGatt = false)
+        }
+
+        addProtocolDivider(container)
+        addProtocolSection(container, "ACTUAL VECTOR CONTENT")
+        addProtocolSwitch(container, "Vector · Crank Revolution Data", configuration.vectorIncludeCrankData) {
+            configuration.vectorIncludeCrankData = it
+            onSensorProtocolConfigurationChanged("cycling_power", rebuildGatt = false)
+        }
+        addProtocolSwitch(container, "Vector · First Crank Measurement Angle", configuration.vectorIncludeFirstCrankAngle) {
+            configuration.vectorIncludeFirstCrankAngle = it
+            onSensorProtocolConfigurationChanged("cycling_power", rebuildGatt = false)
+        }
+        addProtocolSwitch(container, "Vector · Instantaneous Magnitude Array", configuration.vectorIncludeMagnitudeArray) {
+            configuration.vectorIncludeMagnitudeArray = it
+            onSensorProtocolConfigurationChanged("cycling_power", rebuildGatt = false)
+        }
+
+        addProtocolDivider(container)
+        addProtocolSection(container, "ACTUAL CYCLING POWER CONTROL POINT PROCEDURES")
+        val procedures = listOf(
+            0x01 to "Set Cumulative Value",
+            0x02 to "Update Sensor Location",
+            0x03 to "Request Supported Sensor Locations",
+            0x04 to "Set Crank Length",
+            0x05 to "Request Crank Length",
+            0x06 to "Set Chain Length",
+            0x07 to "Request Chain Length",
+            0x08 to "Set Chain Weight",
+            0x09 to "Request Chain Weight",
+            0x0A to "Set Span Length",
+            0x0B to "Request Span Length",
+            0x0C to "Start Offset Compensation",
+            0x0D to "Mask Measurement Content",
+            0x0E to "Request Sampling Rate",
+            0x0F to "Request Factory Calibration Date",
+            0x10 to "Start Enhanced Offset Compensation"
+        )
+        procedures.forEach { (opCode, name) ->
+            addProcedureSwitch(
+                container,
+                configuration.supportedProcedures,
+                opCode,
+                "0x${opCode.toString(16).uppercase().padStart(2, '0')} · $name",
+                "cycling_power"
+            )
+        }
+        addSupportedLocationControls(container, configuration.supportedSensorLocations, "cycling_power")
+    }
+
+    private fun addProtocolSection(container: LinearLayout, label: String) {
+        addSectionLabel(container, label)
+    }
+
+    private fun addProtocolDivider(container: LinearLayout) {
+        addDivider(container)
+    }
+
+    private fun addProtocolSwitch(
+        container: LinearLayout,
+        label: String,
+        checked: Boolean,
+        enabled: Boolean = true,
+        onChanged: (Boolean) -> Unit
+    ): SwitchMaterial {
+        return SwitchMaterial(this).apply {
+            text = label
+            isChecked = checked
+            isEnabled = enabled
+            alpha = if (enabled) 1f else 0.5f
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.simulator_ink))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).also { params -> params.topMargin = dp(6) }
+            styleSimulatorSwitch(this)
+            setOnCheckedChangeListener { _, isChecked -> onChanged(isChecked) }
+            container.addView(this)
+        }
+    }
+
+    private fun addDeclaredFeatureSwitch(
+        container: LinearLayout,
+        label: String,
+        checked: Boolean,
+        enabled: Boolean,
+        onChanged: (Boolean) -> Unit
+    ) {
+        addProtocolSwitch(container, "Declared · $label", checked, enabled, onChanged)
+    }
+
+    private fun addProcedureSwitch(
+        container: LinearLayout,
+        procedures: MutableSet<Int>,
+        opCode: Int,
+        label: String,
+        serviceKey: String
+    ) {
+        addProtocolSwitch(container, "Procedure · $label", opCode in procedures) { enabled ->
+            if (enabled) procedures.add(opCode) else procedures.remove(opCode)
+            onSensorProtocolConfigurationChanged(serviceKey)
+        }
+    }
+
+    private fun addSensorLocationSpinner(
+        container: LinearLayout,
+        label: String,
+        selection: Int,
+        onChanged: (Int) -> Unit
+    ) {
+        container.addView(TextView(this).apply {
+            text = label
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.simulator_ink_muted))
+            textSize = 13f
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).also { params -> params.topMargin = dp(10) }
+        })
+        container.addView(Spinner(this).apply {
+            adapter = ArrayAdapter(
+                this@MainActivity,
+                android.R.layout.simple_spinner_item,
+                SensorLocationValues.names.mapIndexed { index, name -> "$index · $name" }
+            ).also { arrayAdapter ->
+                arrayAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            }
+            setSelection(selection.coerceIn(SensorLocationValues.names.indices), false)
+            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                    if (position != selection) onChanged(position)
+                }
+
+                override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+            }
+        })
+    }
+
+    private fun addDistributedSystemSpinner(
+        container: LinearLayout,
+        label: String,
+        selection: Int,
+        enabled: Boolean,
+        onChanged: (Int) -> Unit
+    ) {
+        container.addView(TextView(this).apply {
+            text = label
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.simulator_ink_muted))
+            textSize = 13f
+            alpha = if (enabled) 1f else 0.5f
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).also { params -> params.topMargin = dp(10) }
+        })
+        container.addView(Spinner(this).apply {
+            adapter = ArrayAdapter(
+                this@MainActivity,
+                android.R.layout.simple_spinner_item,
+                listOf("00 · Unspecified legacy", "01 · Not distributed", "10 · Distributed", "11 · RFU")
+            ).also { arrayAdapter ->
+                arrayAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            }
+            isEnabled = enabled
+            alpha = if (enabled) 1f else 0.5f
+            setSelection(selection.coerceIn(0, 3), false)
+            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                    if (enabled && position != selection) onChanged(position)
+                }
+
+                override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+            }
+        })
+    }
+
+    private fun addSupportedLocationControls(
+        container: LinearLayout,
+        locations: MutableSet<Int>,
+        serviceKey: String
+    ) {
+        addProtocolDivider(container)
+        addProtocolSection(container, "SUPPORTED SENSOR LOCATIONS RETURNED BY CONTROL POINT")
+        SensorLocationValues.names.forEachIndexed { value, name ->
+            addProtocolSwitch(container, "$value · $name", value in locations) { enabled ->
+                if (enabled) locations.add(value) else locations.remove(value)
+                onSensorProtocolConfigurationChanged(serviceKey, rebuildGatt = false)
+            }
+        }
+    }
+
+    private fun onSensorProtocolConfigurationChanged(
+        serviceKey: String,
+        rebuildGatt: Boolean = true
+    ) {
+        val active = serviceKey in selectedOptionalServiceKeys
+        if (active && ::applicationState.isInitialized && rebuildGatt) {
+            applySelectedServiceStack(rebuildGatt = true, logChange = false)
+        } else {
+            updateProfileRowSummaries()
+        }
+        uiHandler.post { setupSensorProtocolControls() }
+    }
+
+    private fun Int.withBit(bit: Int, enabled: Boolean): Int =
+        if (enabled) this or bit else this and bit.inv()
+
+    private fun setExclusiveProfileGroupEnabled(group: ExclusiveProfileGroup, enabled: Boolean) {
+        if (!::applicationState.isInitialized) {
+            initializeApplicationState()
+        }
+
+        val groupKeys = group.profiles.map { profile -> profile.key }.toSet()
+        val before = selectedOptionalServiceKeys.toSet()
+        selectedOptionalServiceKeys.removeAll(groupKeys)
+        if (enabled) {
+            selectedOptionalServiceKeys.add(selectedProfileForExclusiveGroup(group).key)
+        }
+
+        if (selectedOptionalServiceKeys.toSet() != before) {
+            applySelectedServiceStack(rebuildGatt = true, logChange = true)
+        } else {
+            updateProfileButtons()
+        }
+    }
+
+    private fun selectExclusiveProfileInGroup(group: ExclusiveProfileGroup, profile: GattProfileDefinition) {
+        val groupKeys = group.profiles.map { candidate -> candidate.key }.toSet()
+        val wasEnabled = selectedOptionalServiceKeys.any { key -> key in groupKeys }
+        selectedExclusiveProfileKeys[group.groupKey] = profile.key
+
+        if (!wasEnabled) {
+            updateProfileButtons()
+            return
+        }
+
+        val before = selectedOptionalServiceKeys.toSet()
+        selectedOptionalServiceKeys.removeAll(groupKeys)
+        selectedOptionalServiceKeys.add(profile.key)
+        if (selectedOptionalServiceKeys.toSet() != before) {
+            applySelectedServiceStack(rebuildGatt = true, logChange = true)
+        } else {
+            updateProfileButtons()
+        }
+    }
+
+    private fun selectedProfileForExclusiveGroup(group: ExclusiveProfileGroup): GattProfileDefinition {
+        val groupKeys = group.profiles.map { profile -> profile.key }.toSet()
+        val activeKey = selectedOptionalServiceKeys.firstOrNull { key -> key in groupKeys }
+        val selectedKey = activeKey ?: selectedExclusiveProfileKeys[group.groupKey]
+        return group.profiles.firstOrNull { profile -> profile.key == selectedKey } ?: group.profiles.first()
+    }
+
+    private fun exclusiveGroupTitle(groupKey: String): String {
+        if (groupKey.contains("uart", ignoreCase = true)) {
+            return "UART Consoles"
+        }
+        val words = groupKey.replace('_', '-')
+            .split("-")
+            .filter { word -> word.isNotBlank() }
+        return words.joinToString(" ") { word ->
+            if (word.length <= 3) {
+                word.uppercase(Locale.US)
+            } else {
+                word.replaceFirstChar { char -> char.uppercase(Locale.US) }
+            }
+        }.ifBlank { "Exclusive Profiles" }
+    }
+
+    private fun extensionProfileRow(profile: GattProfileDefinition): ServiceProfileRow {
+        val provider = profileProviderByKey[profile.key]?.providerId ?: "extension"
+        val isEnabled = {
+            when (profile.selectionMode) {
+                ProfileSelectionMode.FTMS_MACHINE -> ftmsEnabled && selectedFtmsProfileKey == profile.key
+                ProfileSelectionMode.OPTIONAL_SERVICE -> selectedOptionalServiceKeys.contains(profile.key)
+            }
+        }
+        return ServiceProfileRow(
+            key = profile.key,
+            title = profile.title,
+            subtitle = profile.subtitle,
+            contentView = prepareServiceContent(createExtensionProfileContent(profile, provider)),
+            isEnabled = isEnabled,
+            summary = {
+                "${if (isEnabled()) "On" else "Off"} | ${profile.serviceUuid}"
+            },
+            setEnabled = { enabled ->
+                when (profile.selectionMode) {
+                    ProfileSelectionMode.FTMS_MACHINE -> {
+                        if (enabled) {
+                            toggleProfile(profile)
+                        } else if (selectedFtmsProfileKey == profile.key) {
+                            setFtmsServiceEnabled(false)
+                        }
+                    }
+
+                    ProfileSelectionMode.OPTIONAL_SERVICE -> setOptionalServiceEnabled(profile.key, enabled)
+                }
+            }
+        )
+    }
+
+    private fun createExtensionProfileContent(profile: GattProfileDefinition, provider: String): LinearLayout {
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(14), dp(18), dp(18))
+            layoutParams = AbsListView.LayoutParams(
+                AbsListView.LayoutParams.MATCH_PARENT,
+                AbsListView.LayoutParams.WRAP_CONTENT
+            )
+
+            addSectionLabel(this, "PROFILE DETAILS")
+            addView(TextView(this@MainActivity).apply {
+                text = profile.subtitle
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.simulator_ink_muted))
+                textSize = 14f
+            })
+            addDivider(this)
+
+            addView(TextView(this@MainActivity).apply {
+                text = "Provider: $provider"
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.simulator_ink))
+                textSize = 14f
+                setTypeface(typeface, Typeface.BOLD)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).also { params -> params.topMargin = dp(12) }
+            })
+
+            addView(TextView(this@MainActivity).apply {
+                text = "Service: ${profile.serviceUuid}"
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.simulator_ink_muted))
+                textSize = 13f
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).also { params -> params.topMargin = dp(4) }
+            })
+
+            addDivider(this)
+            addView(TextView(this@MainActivity).apply {
+                text = if (profile.exclusiveGroup != null) {
+                    "This profile is mutually exclusive with other profiles in the same extension group."
+                } else {
+                    "This profile can run alongside other active services."
+                }
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.simulator_ink_muted))
+                textSize = 13f
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).also { params -> params.topMargin = dp(10) }
+            })
+        }
+    }
+
+    private fun refreshServiceProfileList() {
+        if (!::serviceProfileAdapter.isInitialized) {
+            return
+        }
+        serviceProfileAdapter.notifyDataSetChanged()
+        binding.listServiceProfiles.post { refreshServiceProfileListHeight() }
+    }
+
+    private fun refreshServiceProfileListHeight() {
+        if (!::serviceProfileAdapter.isInitialized || !::binding.isInitialized) {
+            return
+        }
+
+        val listView = binding.listServiceProfiles
+        val width = (listView.width.takeIf { it > 0 } ?: (resources.displayMetrics.widthPixels - dp(80)))
+            .coerceAtLeast(dp(120))
+        val widthSpec = View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY)
+        var totalHeight = listView.paddingTop + listView.paddingBottom
+
+        for (groupIndex in 0 until serviceProfileAdapter.groupCount) {
+            val groupView = serviceProfileAdapter.getGroupView(
+                groupIndex,
+                listView.isGroupExpanded(groupIndex),
+                null,
+                listView
+            )
+            totalHeight += measureListItemHeight(groupView, widthSpec)
+
+            if (listView.isGroupExpanded(groupIndex)) {
+                val childView = serviceProfileAdapter.getChildView(groupIndex, 0, true, null, listView)
+                totalHeight += measureListItemHeight(childView, widthSpec)
+            }
+        }
+
+        if (serviceProfileAdapter.groupCount > 1) {
+            totalHeight += listView.dividerHeight * (serviceProfileAdapter.groupCount - 1)
+        }
+
+        val layoutParams = listView.layoutParams
+        if (layoutParams.height != totalHeight) {
+            layoutParams.height = totalHeight
+            listView.layoutParams = layoutParams
+        }
+    }
+
+    private fun measureListItemHeight(view: View, widthSpec: Int): Int {
+        if (view.layoutParams == null) {
+            view.layoutParams = AbsListView.LayoutParams(
+                AbsListView.LayoutParams.MATCH_PARENT,
+                AbsListView.LayoutParams.WRAP_CONTENT
+            )
+        }
+        view.measure(widthSpec, View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        return view.measuredHeight
+    }
+
+    private inner class ServiceProfileAdapter(
+        private val rows: List<ServiceProfileRow>
+    ) : BaseExpandableListAdapter() {
+        override fun getGroupCount(): Int = rows.size
+
+        override fun getChildrenCount(groupPosition: Int): Int = 1
+
+        override fun getGroup(groupPosition: Int): ServiceProfileRow = rows[groupPosition]
+
+        override fun getChild(groupPosition: Int, childPosition: Int): View = rows[groupPosition].contentView
+
+        override fun getGroupId(groupPosition: Int): Long = groupPosition.toLong()
+
+        override fun getChildId(groupPosition: Int, childPosition: Int): Long = groupPosition.toLong()
+
+        override fun hasStableIds(): Boolean = true
+
+        override fun isChildSelectable(groupPosition: Int, childPosition: Int): Boolean = false
+
+        override fun getGroupView(
+            groupPosition: Int,
+            isExpanded: Boolean,
+            convertView: View?,
+            parent: ViewGroup?
+        ): View {
+            val view = if (convertView is LinearLayout && convertView.tag is ServiceGroupHolder) {
+                convertView
+            } else {
+                createServiceGroupView()
+            }
+            val holder = view.tag as ServiceGroupHolder
+
+            val row = getGroup(groupPosition)
+            holder.title.text = row.title
+            holder.summary.text = row.summary()
+            holder.indicator.setImageResource(
+                if (isExpanded) {
+                    R.drawable.ic_accordion_expand_more
+                } else {
+                    R.drawable.ic_accordion_chevron_right
+                }
+            )
+            holder.indicator.contentDescription = if (isExpanded) "Collapse ${row.title}" else "Expand ${row.title}"
+            holder.switchView.setOnCheckedChangeListener(null)
+            holder.switchView.isChecked = row.isEnabled()
+            holder.switchView.visibility = if (row.toggleVisible) View.VISIBLE else View.GONE
+            holder.switchView.setOnCheckedChangeListener { _, isChecked -> row.setEnabled(isChecked) }
+            val titleColor = ContextCompat.getColor(this@MainActivity, R.color.simulator_ink)
+            val summaryColor = ContextCompat.getColor(this@MainActivity, R.color.simulator_ink_muted)
+            holder.title.setTextColor(titleColor)
+            holder.summary.setTextColor(summaryColor)
+            holder.indicator.imageTintList = ColorStateList.valueOf(
+                ContextCompat.getColor(this@MainActivity, R.color.simulator_moss)
+            )
+            holder.spacer.visibility = if (isExpanded) View.GONE else View.VISIBLE
+            view.alpha = if (row.isEnabled()) 1f else 0.72f
+            holder.surface.setBackgroundResource(
+                if (isExpanded) {
+                    R.drawable.simulator_accordion_header_open
+                } else {
+                    R.drawable.simulator_accordion_item_closed
+                }
+            )
+            return view
+        }
+
+        override fun getChildView(
+            groupPosition: Int,
+            childPosition: Int,
+            isLastChild: Boolean,
+            convertView: View?,
+            parent: ViewGroup?
+        ): View {
+            val row = getGroup(groupPosition)
+            row.contentView.alpha = if (row.isEnabled()) 1f else 0.58f
+            row.contentView.layoutParams = AbsListView.LayoutParams(
+                AbsListView.LayoutParams.MATCH_PARENT,
+                AbsListView.LayoutParams.WRAP_CONTENT
+            )
+            return row.contentView
+        }
+    }
+
+    private data class ServiceGroupHolder(
+        val title: TextView,
+        val summary: TextView,
+        val switchView: SwitchMaterial,
+        val indicator: ImageView,
+        val surface: LinearLayout,
+        val spacer: View
+    )
+
+    private fun createServiceGroupView(): LinearLayout {
+        val title = TextView(this).apply {
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.simulator_ink))
+            textSize = 18f
+            setTypeface(typeface, Typeface.BOLD)
+            setSingleLine(false)
+        }
+        val summary = TextView(this).apply {
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.simulator_ink_muted))
+            textSize = 13f
+            setPadding(0, dp(4), 0, 0)
+            setSingleLine(true)
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        val switchView = SwitchMaterial(this).apply {
+            text = ""
+            isFocusable = false
+            styleSimulatorSwitch(this)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).also { params -> params.marginEnd = dp(12) }
+        }
+        val indicator = ImageView(this).apply {
+            setImageResource(R.drawable.ic_accordion_chevron_right)
+            imageTintList = ColorStateList.valueOf(
+                ContextCompat.getColor(this@MainActivity, R.color.simulator_moss)
+            )
+            layoutParams = LinearLayout.LayoutParams(dp(32), dp(32)).also { params ->
+                params.marginStart = dp(6)
+            }
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+        }
+
+        val surface = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            minimumHeight = dp(76)
+            setPadding(dp(18), dp(13), dp(12), dp(13))
+            setBackgroundResource(R.drawable.simulator_accordion_item_closed)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+
+            addView(switchView)
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(
+                    0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    1f
+                )
+                addView(title)
+                addView(summary)
+            })
+            addView(indicator)
+        }
+        val spacer = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(18)
+            )
+        }
+
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = AbsListView.LayoutParams(
+                AbsListView.LayoutParams.MATCH_PARENT,
+                AbsListView.LayoutParams.WRAP_CONTENT
+            )
+            addView(surface)
+            addView(spacer)
+            tag = ServiceGroupHolder(title, summary, switchView, indicator, surface, spacer)
+        }
+    }
+
+    private fun setFtmsServiceEnabled(enabled: Boolean) {
+        if (!::applicationState.isInitialized) {
+            initializeApplicationState()
+        }
+        if (ftmsEnabled == enabled) {
+            updateProfileButtons()
+            return
+        }
+        ftmsEnabled = enabled
+        applySelectedServiceStack(rebuildGatt = true, logChange = true)
+    }
+
+    private fun setOptionalServiceEnabled(key: String, enabled: Boolean) {
+        if (!::applicationState.isInitialized) {
+            initializeApplicationState()
+        }
+
+        val changed = if (enabled) {
+            val profile = profiles[key] ?: return
+            profile.exclusiveGroup?.let { exclusiveGroup ->
+                val exclusiveKeys = profiles.values
+                    .filter { candidate -> candidate.exclusiveGroup == exclusiveGroup }
+                    .map { candidate -> candidate.key }
+                selectedOptionalServiceKeys.removeAll(exclusiveKeys.toSet())
+            }
+            selectedOptionalServiceKeys.add(key)
+        } else {
+            selectedOptionalServiceKeys.remove(key)
+        }
+
+        if (changed) {
+            applySelectedServiceStack(rebuildGatt = true, logChange = true)
+        } else {
+            updateProfileButtons()
+        }
     }
 
     private fun setupFtmsMachineDropdown() {
@@ -303,7 +1424,9 @@ class MainActivity : AppCompatActivity() {
         binding.sliderInclination.addOnChangeListener { _, _, _ -> updateSimulationValuesFromControls() }
         binding.sliderHeartRate.addOnChangeListener { _, _, _ -> updateSimulationValuesFromControls() }
         binding.sliderMetabolicEquivalent.addOnChangeListener { _, _, _ -> updateSimulationValuesFromControls() }
-        binding.sliderTargetDuration.addOnChangeListener { _, _, _ -> updateSimulationValuesFromControls() }
+        binding.sliderTargetDuration.addOnChangeListener { _, _, _ ->
+            updateSimulationValuesFromControls(updateFtmsDuration = true)
+        }
         binding.sliderCscSpeed.addOnChangeListener { _, _, _ -> updateSimulationValuesFromControls() }
         binding.sliderCscCadence.addOnChangeListener { _, _, _ -> updateSimulationValuesFromControls() }
         binding.sliderCyclingPower.addOnChangeListener { _, _, _ -> updateSimulationValuesFromControls() }
@@ -316,8 +1439,11 @@ class MainActivity : AppCompatActivity() {
             viewModel.ftmsControlPointEnabled = isChecked
             if (!isChecked) {
                 viewModel.controlHasBeenTakenInControlPoint.value = false
+                viewModel.ftmsControlOwnerAddress.value = null
                 viewModel.fitnessMachineHasBeenStarted.value = false
-                viewModel.ftmsTargetState.value = FtmsTargetState()
+                viewModel.ftmsTrainingStatus.value = 0x01
+                viewModel.clearFtmsTargetState()
+                updateSimulationValuesFromControls(updateFtmsDuration = true)
             }
             renderedMachineFieldKey = null
             if (::applicationState.isInitialized) {
@@ -329,6 +1455,9 @@ class MainActivity : AppCompatActivity() {
         }
         binding.switchHeartRate.setOnCheckedChangeListener { _, _ ->
             updateSimulationValuesFromControls()
+            if (::applicationState.isInitialized) {
+                applySelectedServiceStack(rebuildGatt = true, logChange = false)
+            }
         }
     }
 
@@ -356,6 +1485,9 @@ class MainActivity : AppCompatActivity() {
                     selectedOptionalServiceKeys.add(profile.key)
                 }
             }
+        }
+        binding.buttonClearFtmsEvents.setOnClickListener {
+            viewModel.clearFtmsProtocolEvents()
         }
 
         applySelectedServiceStack(rebuildGatt = true, logChange = true)
@@ -430,11 +1562,40 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun ftmsCadenceFieldLabel(): String {
+        return when (selectedFtmsProfileKey) {
+            "ftms_rower" -> "Stroke rate"
+            "ftms_cross" -> "Step rate"
+            "ftms_step", "ftms_stair" -> "Steps per minute"
+            else -> "Cadence"
+        }
+    }
+
+    private fun ftmsResistanceFieldLabel(): String {
+        return if (selectedFtmsProfileKey == "ftms_bike") {
+            "Current resistance"
+        } else {
+            "Resistance"
+        }
+    }
+
     private fun setupDeviceStateObservers() {
         viewModel.controlHasBeenTakenInControlPoint.observe(this) { updateDeviceStatePanel() }
+        viewModel.ftmsControlOwnerAddress.observe(this) { updateDeviceStatePanel() }
+        viewModel.ftmsControlProcedureState.observe(this) { updateDeviceStatePanel() }
         viewModel.fitnessMachineHasBeenStarted.observe(this) { updateDeviceStatePanel() }
         viewModel.selectedFitnessMachineMode.observe(this) { updateDeviceStatePanel() }
         viewModel.ftmsTargetState.observe(this) { updateDeviceStatePanel() }
+        viewModel.ftmsTrainingStatus.observe(this) { updateDeviceStatePanel() }
+        viewModel.ftmsSessionDurationMinutes.observe(this) { minutes ->
+            if (binding.sliderTargetDuration.value != minutes) {
+                binding.sliderTargetDuration.value = minutes
+            }
+        }
+        viewModel.ftmsMeasurementSnapshot.observe(this, ::renderFtmsMeasurementSnapshot)
+        viewModel.ftmsProtocolEvents.observe(this, ::renderFtmsProtocolEvents)
+        viewModel.sensorMeasurementSnapshots.observe(this, ::renderSensorMeasurementSnapshots)
+        viewModel.sensorProtocolEvents.observe(this, ::renderSensorProtocolEvents)
     }
 
     private fun updateDeviceStatePanel() {
@@ -457,13 +1618,25 @@ class MainActivity : AppCompatActivity() {
         }
         binding.textControlPointState.text = when {
             !controlPointEnabled -> "Disabled"
-            controlTaken -> "Taken"
+            controlTaken -> "Taken · ${viewModel.ftmsControlOwnerAddress.value ?: "client"}"
             else -> "Available"
         }
         binding.textWorkoutState.text = if (workoutStarted) "Started" else "Idle"
-        binding.textTrainingStatusState.text = if (workoutStarted) "Manual Mode" else "Idle"
+        binding.textTrainingStatusState.text = when (viewModel.ftmsTrainingStatus.value) {
+            0x0D -> "Manual Mode"
+            0x01 -> "Idle"
+            else -> "0x${viewModel.ftmsTrainingStatus.value?.toString(16)?.uppercase() ?: "??"}"
+        }
         binding.textMachineModeState.text = machineName
-        binding.textProcedureState.text = viewModel.ftmsTargetState.value?.summary() ?: "Targets: none"
+        val targets = viewModel.ftmsTargetState.value ?: FtmsTargetState()
+        binding.textProcedureState.text = targets.summary()
+        binding.textControlProcedureState.text = when {
+            !controlPointEnabled -> "Control procedure: disabled"
+            else -> "Control procedure: ${viewModel.ftmsControlProcedureState.value ?: "Idle"}"
+        }
+        binding.textIndoorBikeSimulationState.text = targets.indoorBikeSimulation?.summary()
+            ?: "No bike simulation target received"
+        updateFtmsDurationLabel()
         binding.switchFtmsControlPoint.text = if (controlPointEnabled) {
             "Control Point characteristic enabled"
         } else {
@@ -472,57 +1645,163 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateProfileButtons() {
-        val selectedKeys = selectedProfiles().map { it.key }.toSet()
-        allProfileButtons().forEach { (key, button) ->
-            val selected = if (key == "ftms") ftmsEnabled else selectedKeys.contains(key)
-            button.strokeWidth = if (selected) dp(2) else dp(1)
-            button.setTextColor(ContextCompat.getColor(this, if (selected) R.color.white else R.color.simulator_ink))
-            button.backgroundTintList = ContextCompat.getColorStateList(
-                this,
-                if (selected) R.color.simulator_moss else R.color.simulator_panel
-            )
-        }
         binding.spinnerFtmsMachine.alpha = if (ftmsEnabled) 1f else 0.55f
+        binding.layoutFtmsLiveData.alpha = if (ftmsEnabled) 1f else 0.58f
+        binding.layoutCscLiveData.alpha = if (selectedOptionalServiceKeys.contains("csc")) 1f else 0.58f
+        binding.layoutCyclingPowerLiveData.alpha =
+            if (selectedOptionalServiceKeys.contains("cycling_power")) 1f else 0.58f
+        binding.layoutRscLiveData.alpha = if (selectedOptionalServiceKeys.contains("rsc")) 1f else 0.58f
+        updateProfileRowSummaries()
     }
 
-    private fun renderExtensionProfileButtons() {
-        val extensionProfiles = profiles.values
-            .filter { profile -> !profileButtons.containsKey(profile.key) }
-            .filter { profile -> profile.selectionMode != ProfileSelectionMode.FTMS_MACHINE }
-            .sortedBy { profile -> profile.title }
+    private fun updateProfileRowSummaries() {
+        refreshServiceProfileList()
+    }
 
-        extensionProfileButtons.clear()
-        binding.gridExtensionProfiles.removeAllViews()
-        binding.layoutExtensionProfileSection.visibility =
-            if (extensionProfiles.isEmpty()) View.GONE else View.VISIBLE
+    private fun serviceStateLabel(key: String): String {
+        return if (selectedOptionalServiceKeys.contains(key)) "On" else "Off"
+    }
 
-        extensionProfiles.forEach { profile ->
-            val button = MaterialButton(this).apply {
-                text = profile.title
-                contentDescription = "${profile.title}. ${profile.subtitle}"
-                isAllCaps = false
-                minHeight = dp(64)
-                cornerRadius = dp(18)
-                strokeWidth = dp(1)
-                strokeColor = ContextCompat.getColorStateList(this@MainActivity, R.color.simulator_line)
-                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.simulator_ink))
-                backgroundTintList = ContextCompat.getColorStateList(this@MainActivity, R.color.simulator_panel)
-                layoutParams = GridLayout.LayoutParams().apply {
-                    width = 0
-                    height = dp(64)
-                    columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
-                    setMargins(dp(4), dp(4), dp(4), dp(4))
-                }
-                setOnClickListener { toggleProfile(profile) }
-            }
-            binding.gridExtensionProfiles.addView(button)
-            extensionProfileButtons[profile.key] = button
+    private fun ftmsSummary(): String {
+        return "${if (ftmsEnabled) "On" else "Off"} | ${selectedFtmsMachineListLabel()} | " +
+            "${binding.sliderPower.value.toInt()} W | ${formatOne(binding.sliderSpeed.value)} km/h"
+    }
+
+    private fun cscSummary(): String {
+        val configuration = viewModel.cscConfiguration
+        return "${serviceStateLabel("csc")} | ${formatOne(binding.sliderCscSpeed.value)} km/h | " +
+            "${binding.sliderCscCadence.value.toInt()} rpm | declared 0x${configuration.featureBitsForGatt().toString(16).uppercase()} / actual 0x${configuration.actualFeatureBits().toString(16).uppercase()}"
+    }
+
+    private fun cyclingPowerSummary(): String {
+        val configuration = viewModel.cyclingPowerConfiguration
+        return "${serviceStateLabel("cycling_power")} | ${binding.sliderCyclingPower.value.toInt()} W | " +
+            "${formatOne(binding.sliderCyclingPowerSpeed.value)} km/h | " +
+            "${binding.sliderCyclingPowerCadence.value.toInt()} rpm | declared 0x${configuration.featureBitsForGatt().toUInt().toString(16).uppercase()} / actual 0x${configuration.actualFeatureBits().toUInt().toString(16).uppercase()}"
+    }
+
+    private fun rscSummary(): String {
+        val configuration = viewModel.rscConfiguration
+        return "${serviceStateLabel("rsc")} | ${formatOne(binding.sliderRscSpeed.value)} m/s | " +
+            "${binding.sliderRscCadence.value.toInt()} spm | declared 0x${configuration.featureBitsForGatt().toString(16).uppercase()} / actual 0x${configuration.actualFeatureBits().toString(16).uppercase()}"
+    }
+
+    private fun selectedFtmsMachineLabel(): String {
+        return ftmsMachineOptions.firstOrNull { option -> option.profileKey == selectedFtmsProfileKey }?.label
+            ?: selectedFtmsProfileKey
+    }
+
+    private fun selectedFtmsMachineListLabel(): String {
+        return when (selectedFtmsProfileKey) {
+            "ftms_bike" -> "Bike"
+            "ftms_rower" -> "Rower"
+            "ftms_treadmill" -> "Treadmill"
+            "ftms_cross" -> "Cross"
+            "ftms_step" -> "Step"
+            "ftms_stair" -> "Stair"
+            else -> selectedFtmsMachineLabel()
         }
     }
 
-    private fun allProfileButtons(): Map<String, MaterialButton> {
-        return profileButtons + extensionProfileButtons
+    private fun renderFtmsMeasurementSnapshot(snapshot: FtmsMeasurementSnapshot) {
+        updateIndoorBikeComputedSummary()
+        val recordBytes = if (snapshot.logicalRecordHex.isBlank()) {
+            0
+        } else {
+            snapshot.logicalRecordHex.split(' ').size
+        }
+        binding.textFtmsMeasurementPacketTitle.text =
+            "MEASUREMENT PACKET PREVIEW · $recordBytes B RECORD · ${snapshot.notificationPacketHex.size} ATT PACKET(S)"
+        val shortUuid = snapshot.characteristicUuid.substringBefore('-').uppercase()
+        val packetLines = snapshot.notificationPacketHex.mapIndexed { index, packet ->
+            "P${index + 1}/${snapshot.notificationPacketHex.size}  $packet"
+        }
+        binding.textFtmsMeasurementPackets.text = buildString {
+            append("$shortUuid · ${snapshot.previewPayloadBytes}-byte ATT payload preview\n")
+            append("LOGICAL  ${snapshot.logicalRecordHex}\n")
+            append(packetLines.joinToString("\n"))
+        }
     }
+
+    private fun renderFtmsProtocolEvents(events: List<FtmsProtocolEvent>) {
+        if (events.isEmpty()) {
+            binding.textFtmsProtocolEvents.text =
+                "No Control Point, Fitness Machine Status, or Training Status traffic yet."
+            return
+        }
+        val formatter = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
+        binding.textFtmsProtocolEvents.text = events.take(12).joinToString("\n\n") { event ->
+            val timestamp = formatter.format(Date(event.timestampMillis))
+            "$timestamp  ${event.direction} ${event.channel}  ${event.title}\n${event.payloadHex}"
+        }
+    }
+
+    private fun renderSensorMeasurementSnapshots(
+        snapshots: Map<String, SensorMeasurementSnapshot>
+    ) {
+        binding.textRscMeasurementPreview.text = snapshots["rsc"]
+            ?.let(::formatSensorMeasurementSnapshot)
+            ?: "Waiting for RSC Measurement…"
+        binding.textCscMeasurementPreview.text = snapshots["csc"]
+            ?.let(::formatSensorMeasurementSnapshot)
+            ?: "Waiting for CSC Measurement…"
+
+        val cyclingPowerMeasurement = snapshots["cycling_power"]
+        val cyclingPowerVector = snapshots["cycling_power_vector"]
+        binding.textCyclingPowerMeasurementPreview.text = buildString {
+            append(
+                cyclingPowerMeasurement?.let(::formatSensorMeasurementSnapshot)
+                    ?: "Waiting for Cycling Power Measurement…"
+            )
+            if (cyclingPowerVector != null) {
+                append("\n\nVECTOR\n")
+                append(formatSensorMeasurementSnapshot(cyclingPowerVector))
+            }
+        }
+    }
+
+    private fun formatSensorMeasurementSnapshot(snapshot: SensorMeasurementSnapshot): String {
+        val shortUuid = snapshot.characteristicUuid.substringBefore('-').uppercase()
+        return buildString {
+            append("$shortUuid · ${snapshot.logicalRecordHex.byteCountFromHex()} B logical · ")
+            append("${snapshot.notificationPacketHex.size} packet(s) · ${snapshot.payloadBytes} B payload\n")
+            append("LOGICAL  ${snapshot.logicalRecordHex}")
+            snapshot.notificationPacketHex.forEachIndexed { index, packet ->
+                append("\nP${index + 1}/${snapshot.notificationPacketHex.size}     $packet")
+            }
+        }
+    }
+
+    private fun renderSensorProtocolEvents(
+        eventsByService: Map<String, List<SensorProtocolEvent>>
+    ) {
+        binding.textRscProtocolEvents.text = formatSensorProtocolEvents(
+            eventsByService["rsc"].orEmpty(),
+            "No RSC Control Point traffic yet."
+        )
+        binding.textCscProtocolEvents.text = formatSensorProtocolEvents(
+            eventsByService["csc"].orEmpty(),
+            "No CSC Control Point traffic yet."
+        )
+        binding.textCyclingPowerProtocolEvents.text = formatSensorProtocolEvents(
+            eventsByService["cycling_power"].orEmpty(),
+            "No Cycling Power Control Point traffic yet."
+        )
+    }
+
+    private fun formatSensorProtocolEvents(
+        events: List<SensorProtocolEvent>,
+        emptyMessage: String
+    ): String {
+        if (events.isEmpty()) return emptyMessage
+        val formatter = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
+        return events.take(10).joinToString("\n\n") { event ->
+            val timestamp = formatter.format(Date(event.timestampMillis))
+            "$timestamp  ${event.direction}  ${event.title}\n${event.payloadHex}"
+        }
+    }
+
+    private fun String.byteCountFromHex(): Int = if (isBlank()) 0 else split(' ').size
 
     private fun renderMachineFieldControls() {
         val renderKey = "$ftmsEnabled:$selectedFtmsProfileKey:${viewModel.ftmsControlPointEnabled}:${viewModel.ftmsMirrorTargetFeatureDeclarations}"
@@ -531,14 +1810,14 @@ class MainActivity : AppCompatActivity() {
         }
 
         renderedMachineFieldKey = renderKey
-        binding.layoutIndoorBikeFieldControls.visibility = View.GONE
         binding.layoutMachineFieldControls.visibility = View.GONE
         renderedFieldToggles.clear()
-        clearFieldToggleContainers()
+        binding.layoutMachineFieldToggleList.removeAllViews()
         binding.layoutControlCapabilityToggleList.removeAllViews()
         binding.layoutFtmsControlCapability.visibility = if (ftmsEnabled) View.VISIBLE else View.GONE
 
         if (!ftmsEnabled) {
+            refreshServiceProfileList()
             return
         }
 
@@ -546,45 +1825,12 @@ class MainActivity : AppCompatActivity() {
         val measurementToggles = toggles.filter { toggle -> toggle.labelPrefix == "Feature/data" }
         val controlToggles = toggles.filterNot { toggle -> toggle.labelPrefix == "Feature/data" }
 
-        measurementToggles.groupBy { toggle -> toggle.group }.forEach { (group, togglesForGroup) ->
-            val container = containerFor(group)
-            container.visibility = View.VISIBLE
-            renderFieldToggleGroups(container, togglesForGroup)
+        if (measurementToggles.isNotEmpty()) {
+            binding.layoutMachineFieldControls.visibility = View.VISIBLE
+            renderFieldToggleGroups(binding.layoutMachineFieldToggleList, measurementToggles)
         }
         renderFieldToggleGroups(binding.layoutControlCapabilityToggleList, controlToggles)
-    }
-
-    private fun clearFieldToggleContainers() {
-        fieldToggleContainers().forEach { container ->
-            container.removeAllViews()
-            container.visibility = View.GONE
-        }
-    }
-
-    private fun fieldToggleContainers(): List<LinearLayout> {
-        return listOf(
-            binding.layoutSpeedFieldToggles,
-            binding.layoutCadenceFieldToggles,
-            binding.layoutPowerFieldToggles,
-            binding.layoutResistanceFieldToggles,
-            binding.layoutInclinationFieldToggles,
-            binding.layoutHeartRateFieldToggles,
-            binding.layoutMetabolicFieldToggles,
-            binding.layoutDurationFieldToggles
-        )
-    }
-
-    private fun containerFor(group: FieldToggleGroup): LinearLayout {
-        return when (group) {
-            FieldToggleGroup.SPEED -> binding.layoutSpeedFieldToggles
-            FieldToggleGroup.CADENCE -> binding.layoutCadenceFieldToggles
-            FieldToggleGroup.POWER -> binding.layoutPowerFieldToggles
-            FieldToggleGroup.RESISTANCE -> binding.layoutResistanceFieldToggles
-            FieldToggleGroup.INCLINATION -> binding.layoutInclinationFieldToggles
-            FieldToggleGroup.HEART_RATE -> binding.layoutHeartRateFieldToggles
-            FieldToggleGroup.METABOLIC -> binding.layoutMetabolicFieldToggles
-            FieldToggleGroup.DURATION -> binding.layoutDurationFieldToggles
-        }
+        refreshServiceProfileList()
     }
 
     private fun renderFieldToggleGroups(container: LinearLayout, toggles: List<FieldToggle>) {
@@ -617,14 +1863,15 @@ class MainActivity : AppCompatActivity() {
         val headingToggle = toggles.firstOrNull { toggle -> toggle.labelPrefix == "Actual control" } ?: toggles.first()
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundResource(R.drawable.simulator_toggle_group)
-            setPadding(dp(12), dp(9), dp(12), dp(10))
+            setPadding(0, 0, 0, 0)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).also { params ->
-                params.topMargin = dp(8)
+                params.topMargin = dp(4)
             }
+
+            addDivider(this)
 
             addView(TextView(this@MainActivity).apply {
                 text = headingToggle.label
@@ -751,6 +1998,7 @@ class MainActivity : AppCompatActivity() {
             label = label,
             checked = checked,
             update = update,
+            requiresGattRebuild = true,
             labelPrefix = "Feature/data"
         )
     }
@@ -766,7 +2014,7 @@ class MainActivity : AppCompatActivity() {
             label = label,
             checked = checked,
             update = update,
-            requiresGattRebuild = false,
+            requiresGattRebuild = true,
             labelPrefix = "Actual control",
             enabled = { viewModel.ftmsControlPointEnabled }
         )
@@ -783,7 +2031,7 @@ class MainActivity : AppCompatActivity() {
             label = label,
             checked = checked,
             update = update,
-            requiresGattRebuild = false,
+            requiresGattRebuild = true,
             labelPrefix = "Declared bit",
             enabled = { viewModel.ftmsControlPointEnabled && !viewModel.ftmsMirrorTargetFeatureDeclarations }
         )
@@ -800,7 +2048,7 @@ class MainActivity : AppCompatActivity() {
                     viewModel.syncFtmsDeclaredTargetFeaturesFromActual()
                 }
             },
-            requiresGattRebuild = false,
+            requiresGattRebuild = true,
             labelPrefix = "Capability mode",
             enabled = { viewModel.ftmsControlPointEnabled }
         )
@@ -1035,7 +2283,13 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun updateSimulationValuesFromControls() {
+    private fun updateSimulationValuesFromControls(updateFtmsDuration: Boolean = false) {
+        val cadenceMaximum = if (selectedFtmsProfileKey == "ftms_rower") 127f else 180f
+        if (binding.sliderCadence.value > cadenceMaximum) {
+            binding.sliderCadence.value = cadenceMaximum
+        }
+        binding.sliderCadence.valueTo = cadenceMaximum
+
         val ftmsSpeed = binding.sliderSpeed.value
         val ftmsCadence = binding.sliderCadence.value.toInt()
         val ftmsPower = binding.sliderPower.value.toInt()
@@ -1045,6 +2299,9 @@ class MainActivity : AppCompatActivity() {
         val ftmsMetabolicEquivalent = binding.sliderMetabolicEquivalent.value
         val ftmsTargetDurationMinutes = binding.sliderTargetDuration.value.toInt()
         val ftmsIncludeHeartRate = binding.switchHeartRate.isChecked
+        if (updateFtmsDuration && viewModel.ftmsSessionDurationMinutes.value != binding.sliderTargetDuration.value) {
+            viewModel.ftmsSessionDurationMinutes.value = binding.sliderTargetDuration.value
+        }
 
         val cscSpeed = binding.sliderCscSpeed.value
         val cscCadence = binding.sliderCscCadence.value.toInt()
@@ -1054,15 +2311,14 @@ class MainActivity : AppCompatActivity() {
         val rscSpeed = binding.sliderRscSpeed.value
         val rscCadence = binding.sliderRscCadence.value.toInt()
 
-        binding.labelSpeedValue.text = "FTMS speed ${formatOne(ftmsSpeed)} km/h"
-        binding.labelCadenceValue.text = "FTMS cadence $ftmsCadence rpm"
-        binding.labelPowerValue.text = "FTMS power $ftmsPower W"
-        binding.labelResistanceValue.text = "FTMS resistance $ftmsResistance"
-        val inclineLabel = if (selectedFtmsProfileKey == "ftms_bike") "grade" else "inclination"
-        binding.labelInclinationValue.text = "FTMS $inclineLabel ${formatOne(ftmsInclination)}%"
-        binding.labelHeartRateValue.text = "FTMS heart rate $ftmsHeartRate bpm"
-        binding.labelMetabolicEquivalentValue.text = "FTMS metabolic equivalent ${formatOne(ftmsMetabolicEquivalent)} MET"
-        binding.labelTargetDurationValue.text = "FTMS target duration $ftmsTargetDurationMinutes min"
+        binding.labelSpeedValue.text = "Speed ${formatOne(ftmsSpeed)} km/h"
+        binding.labelCadenceValue.text = "${ftmsCadenceFieldLabel()} $ftmsCadence rpm"
+        binding.labelPowerValue.text = "Power $ftmsPower W"
+        binding.labelResistanceValue.text = "${ftmsResistanceFieldLabel()} $ftmsResistance"
+        binding.labelInclinationValue.text = "Inclination ${formatOne(ftmsInclination)}%"
+        binding.labelHeartRateValue.text = "Heart rate $ftmsHeartRate bpm"
+        binding.labelMetabolicEquivalentValue.text = "MET ${formatOne(ftmsMetabolicEquivalent)}"
+        updateFtmsDurationLabel()
         binding.labelCscSpeedValue.text = "CSC speed ${formatOne(cscSpeed)} km/h"
         binding.labelCscCadenceValue.text = "CSC cadence $cscCadence rpm"
         binding.labelCyclingPowerValue.text = "Cycling Power $cyclingPower W"
@@ -1070,15 +2326,24 @@ class MainActivity : AppCompatActivity() {
         binding.labelCyclingPowerCadenceValue.text = "Cycling Power cadence $cyclingPowerCadence rpm"
         binding.labelRscSpeedValue.text = "RSC speed ${formatOne(rscSpeed)} m/s"
         binding.labelRscCadenceValue.text = "RSC cadence $rscCadence spm"
+        updateProfileRowSummaries()
 
-        binding.layoutIndoorBikeFieldControls.visibility = View.GONE
-        binding.layoutMachineFieldControls.visibility = View.GONE
         val resistanceVisible = selectedFtmsProfileKey in setOf("ftms_bike", "ftms_rower", "ftms_cross")
-        binding.labelResistanceValue.visibility = if (resistanceVisible) View.VISIBLE else View.GONE
-        binding.sliderResistance.visibility = if (resistanceVisible) View.VISIBLE else View.GONE
-        val inclinationVisible = selectedFtmsProfileKey in setOf("ftms_bike", "ftms_treadmill", "ftms_cross")
-        binding.labelInclinationValue.visibility = if (inclinationVisible) View.VISIBLE else View.GONE
-        binding.sliderInclination.visibility = if (inclinationVisible) View.VISIBLE else View.GONE
+        binding.layoutFtmsMeasurementResistance.visibility = if (resistanceVisible) View.VISIBLE else View.GONE
+        val inclinationVisible = selectedFtmsProfileKey in setOf("ftms_treadmill", "ftms_cross")
+        binding.layoutFtmsMeasurementInclination.visibility = if (inclinationVisible) View.VISIBLE else View.GONE
+        val speedVisible = selectedFtmsProfileKey in setOf("ftms_bike", "ftms_treadmill", "ftms_cross")
+        binding.labelSpeedValue.visibility = if (speedVisible) View.VISIBLE else View.GONE
+        binding.sliderSpeed.visibility = if (speedVisible) View.VISIBLE else View.GONE
+        val cadenceVisible = selectedFtmsProfileKey != "ftms_treadmill"
+        binding.labelCadenceValue.visibility = if (cadenceVisible) View.VISIBLE else View.GONE
+        binding.sliderCadence.visibility = if (cadenceVisible) View.VISIBLE else View.GONE
+        val powerVisible = selectedFtmsProfileKey in setOf("ftms_bike", "ftms_treadmill", "ftms_rower", "ftms_cross")
+        binding.labelPowerValue.visibility = if (powerVisible) View.VISIBLE else View.GONE
+        binding.sliderPower.visibility = if (powerVisible) View.VISIBLE else View.GONE
+        val indoorBikeSimulationVisible = selectedFtmsProfileKey == "ftms_bike"
+        binding.layoutIndoorBikeSimulationParameters.visibility =
+            if (indoorBikeSimulationVisible) View.VISIBLE else View.GONE
 
         viewModel.ftmsIndoorBikeData.instantaneousSpeed = ftmsSpeed
         viewModel.ftmsIndoorBikeData.instantaneousCadence = ftmsCadence
@@ -1086,17 +2351,10 @@ class MainActivity : AppCompatActivity() {
         viewModel.ftmsIndoorBikeData.instantaneousPower = ftmsPower
         viewModel.ftmsIndoorBikeData.heartRate = ftmsHeartRate
         viewModel.ftmsIndoorBikeData.metabolicEquivalent = ftmsMetabolicEquivalent
-        viewModel.ftmsIndoorBikeData.targetDurationSeconds = ftmsTargetDurationMinutes * 60
-        viewModel.ftmsIndoorBikeData.includeHeartRate = ftmsIncludeHeartRate
-        if (selectedFtmsProfileKey == "ftms_bike") {
-            val currentSimulation = viewModel.indoorCyclingSimulationParameters.value
-            viewModel.updateSimulationParameters(
-                currentSimulation?.windSpeedMps ?: 0.0f,
-                ftmsInclination.toDouble(),
-                currentSimulation?.crr ?: 0.004f,
-                currentSimulation?.cw ?: 0.5f
-            )
+        if (updateFtmsDuration) {
+            viewModel.ftmsIndoorBikeData.targetDurationSeconds = ftmsTargetDurationMinutes * 60
         }
+        viewModel.ftmsIndoorBikeData.includeHeartRate = ftmsIncludeHeartRate
         updateIndoorBikeComputedSummary()
 
         viewModel.ftmsRowerData.strokeRate = ftmsCadence
@@ -1104,15 +2362,19 @@ class MainActivity : AppCompatActivity() {
         viewModel.ftmsRowerData.instantaneousPower = ftmsPower
         viewModel.ftmsRowerData.heartRate = ftmsHeartRate
         viewModel.ftmsRowerData.metabolicEquivalent = ftmsMetabolicEquivalent
-        viewModel.ftmsRowerData.targetDurationSeconds = ftmsTargetDurationMinutes * 60
+        if (updateFtmsDuration) {
+            viewModel.ftmsRowerData.targetDurationSeconds = ftmsTargetDurationMinutes * 60
+        }
         viewModel.ftmsRowerData.includeHeartRate = ftmsIncludeHeartRate
 
-        viewModel.ftmsTreadmillData.instantaneousSpeed = ftmsSpeed.coerceAtMost(25f)
+        viewModel.ftmsTreadmillData.instantaneousSpeed = ftmsSpeed
         viewModel.ftmsTreadmillData.inclinationPercent = ftmsInclination
         viewModel.ftmsTreadmillData.instantaneousPower = ftmsPower
         viewModel.ftmsTreadmillData.heartRate = ftmsHeartRate
         viewModel.ftmsTreadmillData.metabolicEquivalent = ftmsMetabolicEquivalent
-        viewModel.ftmsTreadmillData.targetDurationSeconds = ftmsTargetDurationMinutes * 60
+        if (updateFtmsDuration) {
+            viewModel.ftmsTreadmillData.targetDurationSeconds = ftmsTargetDurationMinutes * 60
+        }
         viewModel.ftmsTreadmillData.includeHeartRate = ftmsIncludeHeartRate
 
         viewModel.ftmsCrossTrainerData.instantaneousSpeed = ftmsSpeed
@@ -1122,18 +2384,24 @@ class MainActivity : AppCompatActivity() {
         viewModel.ftmsCrossTrainerData.instantaneousPower = ftmsPower
         viewModel.ftmsCrossTrainerData.heartRate = ftmsHeartRate
         viewModel.ftmsCrossTrainerData.metabolicEquivalent = ftmsMetabolicEquivalent
-        viewModel.ftmsCrossTrainerData.targetDurationSeconds = ftmsTargetDurationMinutes * 60
+        if (updateFtmsDuration) {
+            viewModel.ftmsCrossTrainerData.targetDurationSeconds = ftmsTargetDurationMinutes * 60
+        }
         viewModel.ftmsCrossTrainerData.includeHeartRate = ftmsIncludeHeartRate
 
         viewModel.ftmsStairClimberData.stepsPerMinute = ftmsCadence
         viewModel.ftmsStairClimberData.heartRate = ftmsHeartRate
         viewModel.ftmsStairClimberData.metabolicEquivalent = ftmsMetabolicEquivalent
-        viewModel.ftmsStairClimberData.targetDurationSeconds = ftmsTargetDurationMinutes * 60
+        if (updateFtmsDuration) {
+            viewModel.ftmsStairClimberData.targetDurationSeconds = ftmsTargetDurationMinutes * 60
+        }
         viewModel.ftmsStairClimberData.includeHeartRate = ftmsIncludeHeartRate
         viewModel.ftmsStepClimberData.stepsPerMinute = ftmsCadence
         viewModel.ftmsStepClimberData.heartRate = ftmsHeartRate
         viewModel.ftmsStepClimberData.metabolicEquivalent = ftmsMetabolicEquivalent
-        viewModel.ftmsStepClimberData.targetDurationSeconds = ftmsTargetDurationMinutes * 60
+        if (updateFtmsDuration) {
+            viewModel.ftmsStepClimberData.targetDurationSeconds = ftmsTargetDurationMinutes * 60
+        }
         viewModel.ftmsStepClimberData.includeHeartRate = ftmsIncludeHeartRate
 
         // Keep legacy generic values aligned with FTMS for extension providers that have not defined their own controls yet.
@@ -1240,6 +2508,24 @@ class MainActivity : AppCompatActivity() {
 
     private fun formatOne(value: Float): String {
         return String.format(Locale.US, "%.1f", value)
+    }
+
+    private fun updateFtmsDurationLabel() {
+        val localMinutes = binding.sliderTargetDuration.value.toInt()
+        val remoteDurationSeconds = viewModel.ftmsTargetState.value?.trainingTimeSeconds
+        binding.labelTargetDurationValue.text = if (remoteDurationSeconds != null) {
+            "Remaining-time basis ${remoteDurationSeconds}s · remote Control Point target (local default $localMinutes min)"
+        } else {
+            "Session duration / remaining-time basis $localMinutes min"
+        }
+    }
+
+    private fun formatTwo(value: Float): String {
+        return String.format(Locale.US, "%.2f", value)
+    }
+
+    private fun formatFour(value: Float): String {
+        return String.format(Locale.US, "%.4f", value)
     }
 
     private fun dp(value: Int): Int {

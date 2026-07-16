@@ -116,7 +116,7 @@ class RowerData {
     }
 
     fun getResistanceLevelRaw(): Int {
-        return resistanceLevel.ftmsSInt16()
+        return (resistanceLevel * 10).ftmsUInt8()
     }
 
     fun getTotalEnergyKcal(): Int {

@@ -6,12 +6,16 @@ import android.bluetooth.*
 import android.bluetooth.le.AdvertiseCallback
 import android.bluetooth.le.AdvertiseData
 import android.bluetooth.le.AdvertiseSettings
+import android.bluetooth.le.AdvertisingSet
+import android.bluetooth.le.AdvertisingSetCallback
+import android.bluetooth.le.AdvertisingSetParameters
 import android.bluetooth.le.BluetoothLeAdvertiser
 import android.content.*
 import android.content.SharedPreferences.OnSharedPreferenceChangeListener
 import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
+import android.os.ParcelUuid
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
@@ -20,8 +24,10 @@ import de.tobiga.yougattme.Constants.GATT_SERVER_ACTIVATED
 import de.tobiga.yougattme.gatt.AbstractGattProfile
 import de.tobiga.yougattme.gatt.SafeGattServiceManager
 import de.tobiga.yougattme.gatt.csc.CyclingSpeedAndCadenceProfile
+import de.tobiga.yougattme.gatt.cyclingpower.CyclingPowerBroadcastSource
 import de.tobiga.yougattme.gatt.cyclingpower.CyclingPowerProfile
 import de.tobiga.yougattme.gatt.fitnessmachine.FitnessMachineProfile
+import de.tobiga.yougattme.gatt.common.GattNotificationDispatcher
 import de.tobiga.yougattme.gatt.rsc.RunningSpeedAndCadenceProfile
 import de.tobiga.yougattme.tools.toHex
 import java.util.*
@@ -51,6 +57,10 @@ class ApplicationState private constructor(private val context: Context) {
     private val activeProfiles = mutableSetOf<AbstractGattProfile>()
     private val connectedDevices = mutableSetOf<BluetoothDevice>()
     private var isAdvertising = false
+    private var cyclingPowerAdvertisingSet: AdvertisingSet? = null
+    private var cyclingPowerBroadcastStartPending = false
+    private var cyclingPowerBroadcastRequested = false
+    private var pendingCyclingPowerBroadcastPayload = ByteArray(0)
 
     lateinit var mainViewModel : ApplicationViewModel
 
@@ -115,7 +125,9 @@ class ApplicationState private constructor(private val context: Context) {
         pendingGattRestart = null
         if (::mainViewModel.isInitialized) {
             mainViewModel.controlHasBeenTakenInControlPoint.postValue(false)
+            mainViewModel.ftmsControlOwnerAddress.postValue(null)
             mainViewModel.fitnessMachineHasBeenStarted.postValue(false)
+            mainViewModel.ftmsTrainingStatus.postValue(0x01)
         }
 
         if (::bluetoothManager.isInitialized && bluetoothManager.adapter?.isEnabled == true) {
@@ -250,6 +262,17 @@ class ApplicationState private constructor(private val context: Context) {
             }
         }
 
+        override fun onMtuChanged(device: BluetoothDevice, mtu: Int) {
+            Log.i(TAG, "MTU changed for ${device.address}: $mtu")
+            activeProfiles.forEach { profile -> profile.onMtuChanged(device, mtu) }
+        }
+
+        override fun onNotificationSent(device: BluetoothDevice, status: Int) {
+            bluetoothGattServer?.let { server ->
+                GattNotificationDispatcher.onNotificationSent(server, device, status)
+            }
+        }
+
         override fun onServiceAdded(status: Int, service: BluetoothGattService) {
             Log.i(TAG, "âž• Service added: ${service.uuid} (status=$status)")
             safeServiceMgr?.onServiceAdded(status, service)
@@ -373,11 +396,14 @@ class ApplicationState private constructor(private val context: Context) {
     }
 
     private fun cleanupDisconnectedDevice(device: BluetoothDevice) {
+        bluetoothGattServer?.let { server -> GattNotificationDispatcher.clearDevice(server, device) }
         connectedDevices.removeAll { it.address == device.address }
         activeProfiles.forEach { it.onDeviceDisconnected(device) }
         if (::mainViewModel.isInitialized) {
             mainViewModel.controlHasBeenTakenInControlPoint.postValue(false)
+            mainViewModel.ftmsControlOwnerAddress.postValue(null)
             mainViewModel.fitnessMachineHasBeenStarted.postValue(false)
+            mainViewModel.ftmsTrainingStatus.postValue(0x01)
         }
         if (isServerRunning) {
             mainHandler.post {
@@ -468,6 +494,7 @@ class ApplicationState private constructor(private val context: Context) {
      * Stop Bluetooth advertisements.
      */
     private fun stopAdvertising() {
+        stopCyclingPowerBroadcast()
         if (!::bluetoothManager.isInitialized) {
             isAdvertising = false
             return
@@ -482,6 +509,72 @@ class ApplicationState private constructor(private val context: Context) {
             }
         }
         isAdvertising = false
+    }
+
+    private fun updateCyclingPowerBroadcast(enabled: Boolean, payload: ByteArray) {
+        mainHandler.post {
+            cyclingPowerBroadcastRequested = enabled
+            pendingCyclingPowerBroadcastPayload = payload.copyOf()
+            if (!enabled) {
+                stopCyclingPowerBroadcast()
+                return@post
+            }
+            val activeSet = cyclingPowerAdvertisingSet
+            if (activeSet != null) {
+                activeSet.setAdvertisingData(buildCyclingPowerBroadcastData(payload))
+                return@post
+            }
+            if (cyclingPowerBroadcastStartPending) return@post
+            if (!::bluetoothManager.isInitialized) return@post
+            val advertiser = bluetoothManager.adapter.bluetoothLeAdvertiser ?: return@post
+            val parameters = AdvertisingSetParameters.Builder()
+                .setLegacyMode(true)
+                .setConnectable(false)
+                .setScannable(false)
+                .setInterval(AdvertisingSetParameters.INTERVAL_LOW)
+                .setTxPowerLevel(AdvertisingSetParameters.TX_POWER_HIGH)
+                .build()
+            try {
+                cyclingPowerBroadcastStartPending = true
+                advertiser.startAdvertisingSet(
+                    parameters,
+                    buildCyclingPowerBroadcastData(payload),
+                    null,
+                    null,
+                    null,
+                    cyclingPowerAdvertisingSetCallback
+                )
+            } catch (exception: RuntimeException) {
+                cyclingPowerBroadcastStartPending = false
+                Log.w(TAG, "Cycling Power Measurement broadcast unavailable", exception)
+            }
+        }
+    }
+
+    private fun buildCyclingPowerBroadcastData(payload: ByteArray): AdvertiseData =
+        AdvertiseData.Builder()
+            .setIncludeDeviceName(false)
+            .setIncludeTxPowerLevel(false)
+            .addServiceData(
+                ParcelUuid(UUID.fromString("00001818-0000-1000-8000-00805f9b34fb")),
+                payload
+            )
+            .build()
+
+    private fun stopCyclingPowerBroadcast() {
+        cyclingPowerBroadcastRequested = false
+        cyclingPowerBroadcastStartPending = false
+        if (!::bluetoothManager.isInitialized) {
+            cyclingPowerAdvertisingSet = null
+            return
+        }
+        try {
+            bluetoothManager.adapter.bluetoothLeAdvertiser
+                ?.stopAdvertisingSet(cyclingPowerAdvertisingSetCallback)
+        } catch (exception: RuntimeException) {
+            Log.w(TAG, "Ignoring Cycling Power broadcast stop failure", exception)
+        }
+        cyclingPowerAdvertisingSet = null
     }
 
     /**
@@ -523,6 +616,8 @@ class ApplicationState private constructor(private val context: Context) {
      */
     private fun stopServer() {
         val server = bluetoothGattServer
+
+        server?.let(GattNotificationDispatcher::clearServer)
 
         if (server != null) {
             connectedDevices.toList().forEach { device ->
@@ -633,7 +728,7 @@ class ApplicationState private constructor(private val context: Context) {
     }
 
     fun activateRunningSpeedAndCadenceProfile() {
-        replaceActiveProfiles(listOf(RunningSpeedAndCadenceProfile(mainViewModel.runningSpeedAndCadenceData)), rebuildGatt = true)
+        replaceActiveProfiles(listOf(RunningSpeedAndCadenceProfile(mainViewModel)), rebuildGatt = true)
     }
 
 
@@ -656,7 +751,7 @@ class ApplicationState private constructor(private val context: Context) {
             profiles.add(CyclingPowerProfile(mainViewModel))
         }
         if (includeRunningSpeedAndCadence) {
-            profiles.add(RunningSpeedAndCadenceProfile(mainViewModel.runningSpeedAndCadenceData))
+            profiles.add(RunningSpeedAndCadenceProfile(mainViewModel))
         }
 
         configureProfileStack(
@@ -664,6 +759,30 @@ class ApplicationState private constructor(private val context: Context) {
             selectedFitnessMachineMode = ftmsMode,
             rebuildGatt = rebuildGatt
         )
+    }
+
+    private val cyclingPowerAdvertisingSetCallback = object : AdvertisingSetCallback() {
+        override fun onAdvertisingSetStarted(
+            advertisingSet: AdvertisingSet?,
+            txPower: Int,
+            status: Int
+        ) {
+            cyclingPowerBroadcastStartPending = false
+            if (status == ADVERTISE_SUCCESS && cyclingPowerBroadcastRequested) {
+                cyclingPowerAdvertisingSet = advertisingSet
+                advertisingSet?.setAdvertisingData(
+                    buildCyclingPowerBroadcastData(pendingCyclingPowerBroadcastPayload)
+                )
+                Log.i(TAG, "Cycling Power Measurement broadcast started")
+            } else {
+                cyclingPowerAdvertisingSet = null
+                Log.w(TAG, "Cycling Power Measurement broadcast start failed: $status")
+            }
+        }
+
+        override fun onAdvertisingSetStopped(advertisingSet: AdvertisingSet?) {
+            if (cyclingPowerAdvertisingSet == advertisingSet) cyclingPowerAdvertisingSet = null
+        }
     }
 
     fun configureProfileStack(
@@ -714,6 +833,7 @@ class ApplicationState private constructor(private val context: Context) {
     fun destroyAndClearCurrentProfiles() {
         activeProfiles.forEach { it.destroy() }
         activeProfiles.clear()
+        stopCyclingPowerBroadcast()
     }
 
     private fun replaceActiveProfiles(profiles: List<AbstractGattProfile>, rebuildGatt: Boolean) {
@@ -727,9 +847,14 @@ class ApplicationState private constructor(private val context: Context) {
         }
 
         mainViewModel.controlHasBeenTakenInControlPoint.postValue(false)
+        mainViewModel.ftmsControlOwnerAddress.postValue(null)
         mainViewModel.fitnessMachineHasBeenStarted.postValue(false)
+        mainViewModel.ftmsTrainingStatus.postValue(0x01)
         destroyAndClearCurrentProfiles()
         activeProfiles.addAll(profiles)
+        activeProfiles.filterIsInstance<CyclingPowerBroadcastSource>().forEach { profile ->
+            profile.setCyclingPowerBroadcastListener(::updateCyclingPowerBroadcast)
+        }
 
         if (shouldRestartGatt) {
             val restart = Runnable {

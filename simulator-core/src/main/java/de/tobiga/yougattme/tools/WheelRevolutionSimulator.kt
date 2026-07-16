@@ -13,7 +13,7 @@ class WheelRevolutionSimulator {
     private val MAX_WHEEL_REVOLUTIONS = 4294967295L // 0xFFFFFFFF max value for characteristic
 
     private var cumulativeWheelRevolutions: Double = 0.0
-    private var leftOverMillis: Double = 0.0
+    private var wheelPosition: Double = 0.0
     private var lastWheelEventTimestamp: Long = 0L
 
     /**
@@ -46,39 +46,27 @@ class WheelRevolutionSimulator {
             currentTimeMillis - lastWheelEventTimestamp
         }
 
-        // Calculate total available time including leftover from previous simulation
-        val totalAvailableMillis = leftOverMillis + actualDurationMillis
-
-        // Calculate wheel revolutions
         val metersPerSecond = velocity // Already in m/s
         val wheelRevolutionsPerSecond = metersPerSecond / WHEEL_CIRCUMFERENCE
-        val totalWheelRevolutions = wheelRevolutionsPerSecond * (totalAvailableMillis / 1000.0)
+        val totalWheelRevolutions = wheelPosition + wheelRevolutionsPerSecond * (actualDurationMillis / 1000.0)
 
         // Split into full and partial revolutions
         val fullWheelRevolutions = floor(totalWheelRevolutions).toInt()
-        val partialRevolution = totalWheelRevolutions - fullWheelRevolutions
-
-        // Calculate time used for full revolutions
-        val timeForFullRevolutions = (fullWheelRevolutions / wheelRevolutionsPerSecond) * 1000.0
-
-        // Calculate leftover time for partial revolution
-        leftOverMillis = totalAvailableMillis - timeForFullRevolutions
+        wheelPosition = totalWheelRevolutions - fullWheelRevolutions
 
         // Update cumulative wheel revolutions
         cumulativeWheelRevolutions += fullWheelRevolutions
 
         // Handle overflow
         if (cumulativeWheelRevolutions > MAX_WHEEL_REVOLUTIONS) {
-            cumulativeWheelRevolutions -= (MAX_WHEEL_REVOLUTIONS + 1)
+            cumulativeWheelRevolutions = MAX_WHEEL_REVOLUTIONS.toDouble()
         }
 
         // Update timestamp based on when the full revolutions would have completed
-        lastWheelEventTimestamp = if (durationMillis > 0) {
-            // For explicit duration, advance by full duration
-            lastWheelEventTimestamp + actualDurationMillis
+        lastWheelEventTimestamp = if (fullWheelRevolutions > 0) {
+            currentTimeMillis - (wheelPosition / wheelRevolutionsPerSecond * 1000.0).toLong()
         } else {
-            // For real-time simulation, use the time for full revolutions
-            lastWheelEventTimestamp + timeForFullRevolutions.toLong()
+            lastWheelEventTimestamp
         }
 
         return fullWheelRevolutions
@@ -96,8 +84,8 @@ class WheelRevolutionSimulator {
     /**
      * Returns the current cumulative wheel revolutions
      */
-    fun getCumulativeWheelRevolutions(): Int {
-        return cumulativeWheelRevolutions.toInt()
+    fun getCumulativeWheelRevolutions(): Long {
+        return cumulativeWheelRevolutions.toLong()
     }
 
     /**
@@ -107,12 +95,16 @@ class WheelRevolutionSimulator {
         return lastWheelEventTimestamp
     }
 
+    fun setCumulativeWheelRevolutions(value: Long) {
+        cumulativeWheelRevolutions = value.coerceIn(0, MAX_WHEEL_REVOLUTIONS).toDouble()
+    }
+
     /**
      * Resets the simulator to initial state
      */
     fun reset() {
         cumulativeWheelRevolutions = 0.0
-        leftOverMillis = 0.0
+        wheelPosition = 0.0
         lastWheelEventTimestamp = 0L
     }
 }

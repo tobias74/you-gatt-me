@@ -8,6 +8,7 @@ import de.tobiga.yougattme.ApplicationViewModel
 import de.tobiga.yougattme.gatt.AbstractGattProfile
 import de.tobiga.yougattme.gatt.TobigaGattCharacteristic
 import de.tobiga.yougattme.gatt.common.ClientConfigDescriptor
+import de.tobiga.yougattme.gatt.common.GattNotificationDispatcher
 import de.tobiga.yougattme.gatt.common.UserDescriptor
 import de.tobiga.yougattme.gatt.fitnessmachine.FTMS_SPIN_DOWN_STATUS_REQUESTED
 import de.tobiga.yougattme.gatt.fitnessmachine.FtmsHeartRateZoneTargets
@@ -72,6 +73,7 @@ class FitnessMachineControlPointCharacteristic(
     var clientConfigDescriptor: ClientConfigDescriptor
     private var controlOwner: BluetoothDevice? = null
     private var procedureInProgress = false
+    private var procedureDeviceAddress: String? = null
 
     private val GATT_FITNESS_MACHINE_CONTROL_POINT_CHARACTERISTIC_UUID: UUID =
         UUID.fromString("00002AD9-0000-1000-8000-00805f9b34fb")
@@ -117,6 +119,15 @@ class FitnessMachineControlPointCharacteristic(
         value: ByteArray
     ) {
         Log.d("FitnessMachineControlPoint", "Write from ${device.address}: ${value.toHex()}")
+        if (value.isNotEmpty()) {
+            val requestCode = value[0].toInt() and 0xFF
+            mainViewModel.recordFtmsProtocolEvent(
+                direction = "RX",
+                channel = "CONTROL",
+                title = "${requestName(requestCode)} · ${device.address}",
+                payload = value
+            )
+        }
 
         if (offset != 0 || preparedWrite || value.isEmpty()) {
             sendWriteResponse(device, requestId, responseNeeded, BluetoothGatt.GATT_FAILURE)
@@ -136,10 +147,15 @@ class FitnessMachineControlPointCharacteristic(
         sendWriteResponse(device, requestId, responseNeeded, BluetoothGatt.GATT_SUCCESS)
 
         procedureInProgress = true
+        procedureDeviceAddress = device.address
+        statusCharacteristic.beginDeferredNotifications(excludedDeviceAddress = device.address)
+        trainingStatusCharacteristic.beginDeferredNotifications()
         val requestCode = value[0].toInt() and 0xFF
+        mainViewModel.ftmsControlProcedureState.postValue(
+            "Awaiting confirmation · ${requestName(requestCode)}"
+        )
         val result = handleProcedure(device, requestCode, value)
         sendControlPointResponse(device, requestCode, result.resultCode, result.responseParameters)
-        procedureInProgress = false
     }
 
     private fun handleProcedure(device: BluetoothDevice, requestCode: Int, value: ByteArray): ControlPointProcedureResult {
@@ -231,7 +247,13 @@ class FitnessMachineControlPointCharacteristic(
         mainViewModel.ftmsCrossTrainerData.resetSession()
         mainViewModel.ftmsStepClimberData.resetSession()
         mainViewModel.ftmsStairClimberData.resetSession()
-        mainViewModel.ftmsTargetState.postValue(FtmsTargetState())
+        mainViewModel.ftmsIndoorBikeData.targetDurationSeconds = 0
+        mainViewModel.ftmsTreadmillData.targetDurationSeconds = 0
+        mainViewModel.ftmsRowerData.targetDurationSeconds = 0
+        mainViewModel.ftmsCrossTrainerData.targetDurationSeconds = 0
+        mainViewModel.ftmsStepClimberData.targetDurationSeconds = 0
+        mainViewModel.ftmsStairClimberData.targetDurationSeconds = 0
+        mainViewModel.resetFtmsControlState()
         trainingStatusCharacteristic.setTrainingStatus(TRAINING_STATUS_CODES.IDLE)
         statusCharacteristic.sendResetStatus()
         return ControlPointProcedureResult(RESULT_CODE.SUCCESS)
@@ -263,13 +285,9 @@ class FitnessMachineControlPointCharacteristic(
         val rawSpeed = readUInt16(value, 1)
         val speedKmh = rawSpeed / 100f
         val ranges = mainViewModel.ftmsSupportedRanges
-        if (speedKmh < ranges.minSpeedKmh || speedKmh > ranges.maxSpeedKmh) {
+        if (!ranges.supportsSpeedRaw(rawSpeed)) {
             return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
         }
-        mainViewModel.ftmsIndoorBikeData.instantaneousSpeed = speedKmh
-        mainViewModel.ftmsTreadmillData.instantaneousSpeed = speedKmh
-        mainViewModel.ftmsCrossTrainerData.instantaneousSpeed = speedKmh
-        mainViewModel.postInstantaneousSpeed(speedKmh)
         updateTargets { it.copy(speedKmh = speedKmh) }
         statusCharacteristic.sendTargetSpeedChanged(speedKmh)
         return ControlPointProcedureResult(RESULT_CODE.SUCCESS)
@@ -277,13 +295,12 @@ class FitnessMachineControlPointCharacteristic(
 
     private fun handleSetTargetInclination(value: ByteArray): ControlPointProcedureResult {
         if (value.size != 3) return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
-        val inclinationPercent = readSInt16(value, 1) / 10f
+        val rawInclination = readSInt16(value, 1)
+        val inclinationPercent = rawInclination / 10f
         val ranges = mainViewModel.ftmsSupportedRanges
-        if (inclinationPercent < ranges.minInclinationPercent || inclinationPercent > ranges.maxInclinationPercent) {
+        if (!ranges.supportsInclinationRaw(rawInclination)) {
             return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
         }
-        mainViewModel.ftmsTreadmillData.inclinationPercent = inclinationPercent
-        mainViewModel.ftmsCrossTrainerData.inclinationPercent = inclinationPercent
         mainViewModel.ftmsReceivedTargetInclination.postValue(inclinationPercent.toDouble())
         updateTargets { it.copy(inclinationPercent = inclinationPercent) }
         statusCharacteristic.sendTargetInclinationChanged(inclinationPercent.toDouble())
@@ -291,15 +308,13 @@ class FitnessMachineControlPointCharacteristic(
     }
 
     private fun handleSetTargetResistanceLevel(value: ByteArray): ControlPointProcedureResult {
-        if (value.size != 3) return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
-        val resistanceLevel = readSInt16(value, 1) / 10f
+        if (value.size != 2) return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
+        val rawResistance = value[1].toInt() and 0xFF
+        val resistanceLevel = rawResistance / 10f
         val ranges = mainViewModel.ftmsSupportedRanges
-        if (resistanceLevel < ranges.minResistanceLevel || resistanceLevel > ranges.maxResistanceLevel) {
+        if (!ranges.supportsResistanceRaw(rawResistance)) {
             return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
         }
-        mainViewModel.ftmsIndoorBikeData.resistanceLevel = resistanceLevel.toInt()
-        mainViewModel.ftmsRowerData.resistanceLevel = resistanceLevel.toInt()
-        mainViewModel.ftmsCrossTrainerData.resistanceLevel = resistanceLevel.toInt()
         updateTargets { it.copy(resistanceLevel = resistanceLevel) }
         statusCharacteristic.sendTargetResistanceLevelChanged(resistanceLevel)
         return ControlPointProcedureResult(RESULT_CODE.SUCCESS)
@@ -309,14 +324,9 @@ class FitnessMachineControlPointCharacteristic(
         if (value.size != 3) return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
         val power = readSInt16(value, 1)
         val ranges = mainViewModel.ftmsSupportedRanges
-        if (power < ranges.minPowerWatt || power > ranges.maxPowerWatt) {
+        if (!ranges.supportsPower(power)) {
             return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
         }
-        mainViewModel.ftmsIndoorBikeData.instantaneousPower = power
-        mainViewModel.ftmsTreadmillData.instantaneousPower = power
-        mainViewModel.ftmsRowerData.instantaneousPower = power
-        mainViewModel.ftmsCrossTrainerData.instantaneousPower = power
-        mainViewModel.postInstantaneousPower(power)
         mainViewModel.receivedTargetPowerInControlPoint.postValue(power)
         updateTargets { it.copy(powerWatt = power) }
         statusCharacteristic.sendTargetPowerChanged(power)
@@ -327,15 +337,9 @@ class FitnessMachineControlPointCharacteristic(
         if (value.size != 2) return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
         val heartRate = value[1].toInt() and 0xFF
         val ranges = mainViewModel.ftmsSupportedRanges
-        if (heartRate < ranges.minHeartRateBpm || heartRate > ranges.maxHeartRateBpm) {
+        if (!ranges.supportsHeartRate(heartRate)) {
             return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
         }
-        mainViewModel.ftmsIndoorBikeData.heartRate = heartRate
-        mainViewModel.ftmsTreadmillData.heartRate = heartRate
-        mainViewModel.ftmsRowerData.heartRate = heartRate
-        mainViewModel.ftmsCrossTrainerData.heartRate = heartRate
-        mainViewModel.ftmsStepClimberData.heartRate = heartRate
-        mainViewModel.ftmsStairClimberData.heartRate = heartRate
         updateTargets { it.copy(heartRateBpm = heartRate) }
         statusCharacteristic.sendTargetHeartRateChanged(heartRate)
         return ControlPointProcedureResult(RESULT_CODE.SUCCESS)
@@ -480,15 +484,6 @@ class FitnessMachineControlPointCharacteristic(
     private fun handleSetTargetedCadence(value: ByteArray): ControlPointProcedureResult {
         if (value.size != 3) return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
         val cadenceRpm = readUInt16(value, 1) / 2f
-        if (cadenceRpm !in 0f..240f) {
-            return ControlPointProcedureResult(RESULT_CODE.INVALID_PARAMETER)
-        }
-        mainViewModel.ftmsIndoorBikeData.instantaneousCadence = cadenceRpm.toInt()
-        mainViewModel.ftmsRowerData.strokeRate = cadenceRpm.toInt()
-        mainViewModel.ftmsCrossTrainerData.instantaneousStepsPerMinute = cadenceRpm.toInt()
-        mainViewModel.ftmsStepClimberData.stepsPerMinute = cadenceRpm.toInt()
-        mainViewModel.ftmsStairClimberData.stepsPerMinute = cadenceRpm.toInt()
-        mainViewModel.postInstantaneousCadence(cadenceRpm.toInt())
         updateTargets { it.copy(cadenceRpm = cadenceRpm) }
         statusCharacteristic.sendTargetedCadenceChanged(cadenceRpm)
         return ControlPointProcedureResult(RESULT_CODE.SUCCESS)
@@ -503,6 +498,7 @@ class FitnessMachineControlPointCharacteristic(
         return if (owner == null || owner.address == device.address) {
             controlOwner = device
             mainViewModel.controlHasBeenTakenInControlPoint.postValue(true)
+            mainViewModel.ftmsControlOwnerAddress.postValue(device.address)
             ControlPointProcedureResult(RESULT_CODE.SUCCESS)
         } else {
             ControlPointProcedureResult(RESULT_CODE.CONTROL_NOT_PERMITTED)
@@ -510,8 +506,7 @@ class FitnessMachineControlPointCharacteristic(
     }
 
     private fun updateTargets(update: (FtmsTargetState) -> FtmsTargetState) {
-        val current = mainViewModel.ftmsTargetState.value ?: FtmsTargetState()
-        mainViewModel.ftmsTargetState.postValue(update(current))
+        mainViewModel.updateFtmsTargetState(update)
     }
 
     private fun readUInt16(value: ByteArray, offset: Int): Int {
@@ -534,6 +529,9 @@ class FitnessMachineControlPointCharacteristic(
 
     fun onDeviceDisconnected(device: BluetoothDevice) {
         clientConfigDescriptor.removeDevice(device)
+        if (procedureDeviceAddress == device.address) {
+            finishProcedure(notificationsCanBeSent = false)
+        }
         if (isControlOwner(device)) {
             clearControlOwner()
         }
@@ -541,12 +539,14 @@ class FitnessMachineControlPointCharacteristic(
 
     fun clearDevicesAndControl() {
         clientConfigDescriptor.clearDevices()
+        finishProcedure(notificationsCanBeSent = false)
         clearControlOwner()
     }
 
     private fun clearControlOwner() {
         controlOwner = null
         mainViewModel.controlHasBeenTakenInControlPoint.postValue(false)
+        mainViewModel.ftmsControlOwnerAddress.postValue(null)
     }
 
     private fun sendWriteResponse(
@@ -566,11 +566,76 @@ class FitnessMachineControlPointCharacteristic(
         resultCode: Int,
         responseParameters: ByteArray
     ) {
-        gattCharacteristic.value = byteArrayOf(
+        val response = byteArrayOf(
             RESPONSE_CODE.toByte(),
             requestCode.toByte(),
             resultCode.toByte()
         ) + responseParameters
-        gattProfile.bluetoothGattServer!!.notifyCharacteristicChanged(device, gattCharacteristic, true)
+        mainViewModel.recordFtmsProtocolEvent(
+            direction = "TX",
+            channel = "CONTROL",
+            title = "${requestName(requestCode)} response: ${resultName(resultCode)} · ${device.address}",
+            payload = response
+        )
+        GattNotificationDispatcher.enqueue(
+            server = gattProfile.bluetoothGattServer!!,
+            device = device,
+            characteristic = gattCharacteristic,
+            confirm = true,
+            value = response,
+            onComplete = { status ->
+                finishProcedure(notificationsCanBeSent = status == BluetoothGatt.GATT_SUCCESS)
+            }
+        )
+    }
+
+    private fun finishProcedure(notificationsCanBeSent: Boolean) {
+        if (!procedureInProgress) {
+            return
+        }
+        procedureInProgress = false
+        procedureDeviceAddress = null
+        mainViewModel.ftmsControlProcedureState.postValue("Idle")
+        if (notificationsCanBeSent) {
+            statusCharacteristic.completeDeferredNotifications()
+            trainingStatusCharacteristic.completeDeferredNotifications()
+        } else {
+            statusCharacteristic.discardDeferredNotifications()
+            trainingStatusCharacteristic.discardDeferredNotifications()
+        }
+    }
+
+    private fun requestName(requestCode: Int): String = when (requestCode) {
+        REQUEST_CODE.REQUEST_CONTROL -> "Request control"
+        REQUEST_CODE.RESET -> "Reset"
+        REQUEST_CODE.SET_TARGET_SPEED -> "Set target speed"
+        REQUEST_CODE.SET_TARGET_INCLINATION -> "Set target inclination"
+        REQUEST_CODE.SET_TARGET_RESISTANCE_LEVEL -> "Set target resistance"
+        REQUEST_CODE.SET_TARGET_POWER -> "Set target power"
+        REQUEST_CODE.SET_TARGET_HEART_RATE -> "Set target heart rate"
+        REQUEST_CODE.START_OR_RESUME -> "Start or resume"
+        REQUEST_CODE.STOP_OR_PAUSE -> "Stop or pause"
+        REQUEST_CODE.SET_TARGETED_EXPENDED_ENERGY -> "Set target energy"
+        REQUEST_CODE.SET_TARGETED_NUMBER_OF_STEPS -> "Set target steps"
+        REQUEST_CODE.SET_TARGETED_NUMBER_OF_STRIDES -> "Set target strides"
+        REQUEST_CODE.SET_TARGETED_DISTANCE -> "Set target distance"
+        REQUEST_CODE.SET_TARGETED_TRAINING_TIME -> "Set target training time"
+        REQUEST_CODE.SET_TARGETED_TIME_IN_TWO_HEART_RATE_ZONES -> "Set two HR zones"
+        REQUEST_CODE.SET_TARGETED_TIME_IN_THREE_HEART_RATE_ZONES -> "Set three HR zones"
+        REQUEST_CODE.SET_TARGETED_TIME_IN_FIVE_HEART_RATE_ZONES -> "Set five HR zones"
+        REQUEST_CODE.SET_INDOOR_BIKE_SIMULATION -> "Set bike simulation"
+        REQUEST_CODE.SET_WHEEL_CIRCUMFERENCE -> "Set wheel circumference"
+        REQUEST_CODE.SPIN_DOWN_CONTROL -> "Spin-down control"
+        REQUEST_CODE.SET_TARGETED_CADENCE -> "Set target cadence"
+        else -> "Unknown procedure 0x${requestCode.toString(16).uppercase()}"
+    }
+
+    private fun resultName(resultCode: Int): String = when (resultCode) {
+        RESULT_CODE.SUCCESS -> "success"
+        RESULT_CODE.OP_CODE_NOT_SUPPORTED -> "not supported"
+        RESULT_CODE.INVALID_PARAMETER -> "invalid parameter"
+        RESULT_CODE.OPERATION_FAILED -> "operation failed"
+        RESULT_CODE.CONTROL_NOT_PERMITTED -> "control not permitted"
+        else -> "0x${resultCode.toString(16).uppercase()}"
     }
 }

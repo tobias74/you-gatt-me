@@ -106,9 +106,9 @@ class SupportedResistanceLevelRangeCharacteristic(
 ) {
     override fun getPayload(): ByteArray {
         val writer = FtmsPacketWriter()
-        writer.s16(ranges.resistanceRaw(ranges.minResistanceLevel))
-        writer.s16(ranges.resistanceRaw(ranges.maxResistanceLevel))
-        writer.u16(ranges.resistanceRaw(ranges.resistanceIncrement))
+        writer.u8(ranges.resistanceRaw(ranges.minResistanceLevel))
+        writer.u8(ranges.resistanceRaw(ranges.maxResistanceLevel))
+        writer.u8(ranges.resistanceRaw(ranges.resistanceIncrement))
         return writer.bytes()
     }
 }

@@ -52,13 +52,13 @@ class TreadmillData {
         }
 
     var instantaneousPace: Float
-        get() = getInstantaneousPaceKmpmTenths() / 10f
+        get() = getInstantaneousPaceSeconds().toFloat()
         set(value) {
             // Kept for legacy fragment compatibility; pace is derived internally.
         }
 
     var averagePace: Float
-        get() = getAveragePaceKmpmTenths() / 10f
+        get() = getAveragePaceSeconds().toFloat()
         set(value) {
             // Kept for legacy fragment compatibility; pace is derived internally.
         }
@@ -132,16 +132,19 @@ class TreadmillData {
         return (negativeElevationMeters * 10.0).roundToFtmsUInt16()
     }
 
-    fun getInstantaneousPaceKmpmTenths(): Int {
-        return (instantaneousSpeed.coerceAtLeast(0f).toDouble() / 60.0 * 10.0).roundToFtmsUInt8()
-    }
-
-    fun getAveragePaceKmpmTenths(): Int {
-        if (elapsedTimeSeconds <= 0.0) {
+    fun getInstantaneousPaceSeconds(): Int {
+        val metersPerSecond = instantaneousSpeed.coerceAtLeast(0f).toDouble() / 3.6
+        if (metersPerSecond <= 0.0) {
             return 0
         }
-        val averageSpeedKmh = totalDistanceMeters / elapsedTimeSeconds * 3.6
-        return (averageSpeedKmh / 60.0 * 10.0).roundToFtmsUInt8()
+        return (500.0 / metersPerSecond).roundToFtmsUInt16()
+    }
+
+    fun getAveragePaceSeconds(): Int {
+        if (elapsedTimeSeconds <= 0.0 || totalDistanceMeters <= 0.0) {
+            return 0
+        }
+        return (elapsedTimeSeconds / totalDistanceMeters * 500.0).roundToFtmsUInt16()
     }
 
     fun getTotalEnergyKcal(): Int {

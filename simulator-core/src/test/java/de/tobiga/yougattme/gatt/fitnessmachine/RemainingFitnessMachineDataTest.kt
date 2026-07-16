@@ -21,7 +21,7 @@ class RemainingFitnessMachineDataTest {
         assertEquals(10, data.getElapsedTimeSeconds())
         assertEquals(100, data.getTotalDistanceMeters())
         assertEquals(3600, data.getAverageSpeedHundredthsKmh())
-        assertEquals(6, data.getInstantaneousPaceKmpmTenths())
+        assertEquals(50, data.getInstantaneousPaceSeconds())
         assertEquals(20, data.getForceOnBeltNewton())
     }
 

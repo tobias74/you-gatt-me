@@ -18,45 +18,9 @@
         android:paddingEnd="20dp"
         android:paddingBottom="96dp">
 
-        <TextView
-            android:id="@+id/textEyebrow"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:background="@drawable/simulator_status_pill"
-            android:fontFamily="sans-serif-condensed"
-            android:letterSpacing="0.14"
-            android:text="OPEN GATT LAB"
-            android:textAllCaps="true"
-            android:textColor="@color/simulator_lime"
-            android:textSize="12sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/textTitle"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="18dp"
-            android:fontFamily="serif"
-            android:lineSpacingExtra="-4dp"
-            android:text="Simulator Console"
-            android:textColor="@color/simulator_ink"
-            android:textSize="44sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/textSubtitle"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Build, activate, and inspect Bluetooth GATT profile simulations from one control surface."
-            android:textColor="@color/simulator_ink_muted"
-            android:textSize="16sp" />
-
         <com.google.android.material.card.MaterialCardView
-            android:id="@+id/cardRuntime"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="26dp"
             app:cardBackgroundColor="@color/simulator_panel"
             app:cardCornerRadius="28dp"
             app:cardElevation="0dp"
@@ -169,105 +133,246 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/cardProfiles"
+        <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="18dp"
-            app:cardBackgroundColor="@color/simulator_panel"
-            app:cardCornerRadius="28dp"
-            app:cardElevation="0dp"
-            app:strokeColor="@color/simulator_line"
-            app:strokeWidth="1dp">
+            android:layout_marginTop="28dp"
+            android:fontFamily="serif"
+            android:text="Profiles"
+            android:textColor="@color/simulator_ink"
+            android:textSize="30sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/textFeatureBitExplanation"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Tap a profile to edit it. Use the row switch to toggle the active GATT stack."
+            android:textColor="@color/simulator_ink_muted"
+            android:textSize="14sp" />
+
+        <ExpandableListView
+            android:id="@+id/listServiceProfiles"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:cacheColorHint="@android:color/transparent"
+            android:choiceMode="none"
+            android:clipToPadding="false"
+            android:divider="@android:color/transparent"
+            android:dividerHeight="0dp"
+            android:groupIndicator="@null"
+            android:nestedScrollingEnabled="false" />
+
+        <LinearLayout
+            android:id="@+id/layoutProfileContentStaging"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
 
             <LinearLayout
+                android:id="@+id/layoutFtmsLiveData"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:padding="20dp">
-
+                android:padding="14dp">
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:fontFamily="sans-serif-condensed"
                     android:letterSpacing="0.08"
-                    android:text="PROFILE CATALOG"
+                    android:text="REMOTE CONTROL STATE"
                     android:textAllCaps="true"
                     android:textColor="@color/simulator_moss"
                     android:textSize="13sp"
                     android:textStyle="bold" />
 
-                <TextView
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:text="Build a service stack. Toggle FTMS like any other service; when it is active, choose exactly one FTMS equipment type from the dropdown."
-                    android:textColor="@color/simulator_ink_muted"
-                    android:textSize="14sp" />
+                    android:layout_marginTop="8dp"
+                    android:orientation="vertical"
+                    android:padding="0dp">
 
-                <GridLayout
+                    <TextView
+                        android:id="@+id/textDeviceStateTitle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Workout idle"
+                        android:textColor="@color/simulator_ink"
+                        android:textSize="22sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/textDeviceStateSubtitle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="5dp"
+                        android:text="Control Point is available. No client owns the machine yet."
+                        android:textColor="@color/simulator_ink_muted"
+                        android:textSize="13sp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="14dp"
+                        android:orientation="horizontal"
+                        android:weightSum="2">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:fontFamily="sans-serif-condensed"
+                                android:letterSpacing="0.08"
+                                android:text="CONTROL"
+                                android:textAllCaps="true"
+                                android:textColor="@color/simulator_moss"
+                                android:textSize="11sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/textControlPointState"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:text="Available"
+                                android:textColor="@color/simulator_ink"
+                                android:textSize="16sp"
+                                android:textStyle="bold" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:fontFamily="sans-serif-condensed"
+                                android:letterSpacing="0.08"
+                                android:text="WORKOUT"
+                                android:textAllCaps="true"
+                                android:textColor="@color/simulator_moss"
+                                android:textSize="11sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/textWorkoutState"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:text="Idle"
+                                android:textColor="@color/simulator_ink"
+                                android:textSize="16sp"
+                                android:textStyle="bold" />
+                        </LinearLayout>
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:orientation="horizontal"
+                        android:weightSum="2">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:fontFamily="sans-serif-condensed"
+                                android:letterSpacing="0.08"
+                                android:text="TRAINING"
+                                android:textAllCaps="true"
+                                android:textColor="@color/simulator_moss"
+                                android:textSize="11sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/textTrainingStatusState"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:text="Idle"
+                                android:textColor="@color/simulator_ink"
+                                android:textSize="16sp"
+                                android:textStyle="bold" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:fontFamily="sans-serif-condensed"
+                                android:letterSpacing="0.08"
+                                android:text="MACHINE"
+                                android:textAllCaps="true"
+                                android:textColor="@color/simulator_moss"
+                                android:textSize="11sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/textMachineModeState"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:text="Indoor Bike"
+                                android:textColor="@color/simulator_ink"
+                                android:textSize="16sp"
+                                android:textStyle="bold" />
+                        </LinearLayout>
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/textProcedureState"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:fontFamily="monospace"
+                        android:text="Targets: none"
+                        android:textColor="@color/simulator_ink_muted"
+                        android:textSize="12sp" />
+
+                    <TextView
+                        android:id="@+id/textControlProcedureState"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:fontFamily="monospace"
+                        android:text="Control procedure: idle"
+                        android:textColor="@color/simulator_ink_muted"
+                        android:textSize="12sp" />
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="18dp"
+                    android:background="@color/simulator_line" />
+
+                <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="18dp"
-                    android:columnCount="2">
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/buttonFtms"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                        android:layout_width="0dp"
-                        android:layout_height="64dp"
-                        android:layout_columnWeight="1"
-                        android:layout_margin="4dp"
-                        android:text="FTMS"
-                        android:textAllCaps="false"
-                        android:textColor="@color/simulator_ink"
-                        app:cornerRadius="18dp"
-                        app:strokeColor="@color/simulator_line" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/buttonCsc"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                        android:layout_width="0dp"
-                        android:layout_height="64dp"
-                        android:layout_columnWeight="1"
-                        android:layout_margin="4dp"
-                        android:text="CSC"
-                        android:textAllCaps="false"
-                        android:textColor="@color/simulator_ink"
-                        app:cornerRadius="18dp"
-                        app:strokeColor="@color/simulator_line" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/buttonCyclingPower"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                        android:layout_width="0dp"
-                        android:layout_height="64dp"
-                        android:layout_columnWeight="1"
-                        android:layout_margin="4dp"
-                        android:text="Cycling Power"
-                        android:textAllCaps="false"
-                        android:textColor="@color/simulator_ink"
-                        app:cornerRadius="18dp"
-                        app:strokeColor="@color/simulator_line" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/buttonRsc"
-                        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-                        android:layout_width="0dp"
-                        android:layout_height="64dp"
-                        android:layout_columnWeight="1"
-                        android:layout_margin="4dp"
-                        android:text="RSC"
-                        android:textAllCaps="false"
-                        android:textColor="@color/simulator_ink"
-                        app:cornerRadius="18dp"
-                        app:strokeColor="@color/simulator_line" />
-                </GridLayout>
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
                     android:fontFamily="sans-serif-condensed"
                     android:letterSpacing="0.08"
                     android:text="FTMS DEVICE TYPE"
@@ -281,24 +386,92 @@
                     android:layout_width="match_parent"
                     android:layout_height="52dp"
                     android:layout_marginTop="8dp"
-                    android:background="@drawable/simulator_toggle_group"
                     android:paddingStart="12dp"
                     android:paddingEnd="12dp" />
 
-                <LinearLayout
-                    android:id="@+id/layoutExtensionProfileSection"
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="14dp"
+                    android:background="@color/simulator_line" />
+
+                <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="18dp"
-                    android:orientation="vertical"
-                    android:visibility="gone">
+                    android:fontFamily="sans-serif-condensed"
+                    android:letterSpacing="0.08"
+                    android:text="FTMS MEASUREMENT DATA"
+                    android:textAllCaps="true"
+                    android:textColor="@color/simulator_moss"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="Values emitted in the selected FTMS machine data characteristic. Control Point targets are tracked separately in the status area."
+                    android:textColor="@color/simulator_ink_muted"
+                    android:textSize="13sp" />
+
+                <TextView android:id="@+id/labelSpeedValue" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:text="Speed 25.0 km/h" android:textColor="@color/simulator_ink" android:textSize="16sp" android:textStyle="bold" />
+                <com.google.android.material.slider.Slider android:id="@+id/sliderSpeed" android:layout_width="match_parent" android:layout_height="wrap_content" android:value="25" android:valueFrom="0" android:valueTo="60" android:stepSize="0.5" />
+
+                <TextView android:id="@+id/labelCadenceValue" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="Cadence 80 rpm" android:textColor="@color/simulator_ink" android:textSize="16sp" android:textStyle="bold" />
+                <com.google.android.material.slider.Slider android:id="@+id/sliderCadence" android:layout_width="match_parent" android:layout_height="wrap_content" android:value="80" android:valueFrom="0" android:valueTo="180" android:stepSize="1" />
+
+                <TextView android:id="@+id/labelPowerValue" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="Power 150 W" android:textColor="@color/simulator_ink" android:textSize="16sp" android:textStyle="bold" />
+                <com.google.android.material.slider.Slider android:id="@+id/sliderPower" android:layout_width="match_parent" android:layout_height="wrap_content" android:value="150" android:valueFrom="0" android:valueTo="1000" android:stepSize="5" />
+
+                <LinearLayout
+                    android:id="@+id/layoutFtmsMeasurementResistance"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <TextView android:id="@+id/labelResistanceValue" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="Current resistance 20" android:textColor="@color/simulator_ink" android:textSize="16sp" android:textStyle="bold" />
+                    <com.google.android.material.slider.Slider android:id="@+id/sliderResistance" android:layout_width="match_parent" android:layout_height="wrap_content" android:value="20" android:valueFrom="0" android:valueTo="25" android:stepSize="1" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/layoutFtmsMeasurementInclination"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <TextView android:id="@+id/labelInclinationValue" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="Inclination 0.0%" android:textColor="@color/simulator_ink" android:textSize="16sp" android:textStyle="bold" />
+                    <com.google.android.material.slider.Slider android:id="@+id/sliderInclination" android:layout_width="match_parent" android:layout_height="wrap_content" android:value="0" android:valueFrom="-20" android:valueTo="20" android:stepSize="0.5" />
+                </LinearLayout>
+
+                <TextView android:id="@+id/labelHeartRateValue" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="Heart rate 120 bpm" android:textColor="@color/simulator_ink" android:textSize="16sp" android:textStyle="bold" />
+                <com.google.android.material.slider.Slider android:id="@+id/sliderHeartRate" android:layout_width="match_parent" android:layout_height="wrap_content" android:value="120" android:valueFrom="40" android:valueTo="220" android:stepSize="1" />
+
+                <TextView android:id="@+id/labelMetabolicEquivalentValue" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="MET 8.0" android:textColor="@color/simulator_ink" android:textSize="16sp" android:textStyle="bold" />
+                <com.google.android.material.slider.Slider android:id="@+id/sliderMetabolicEquivalent" android:layout_width="match_parent" android:layout_height="wrap_content" android:value="8" android:valueFrom="0" android:valueTo="25" android:stepSize="0.1" />
+
+                <TextView android:id="@+id/labelTargetDurationValue" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="Session duration / remaining-time basis 30 min" android:textColor="@color/simulator_ink" android:textSize="16sp" android:textStyle="bold" />
+                <com.google.android.material.slider.Slider android:id="@+id/sliderTargetDuration" android:layout_width="match_parent" android:layout_height="wrap_content" android:value="30" android:valueFrom="0" android:valueTo="240" android:stepSize="1" />
+
+                <LinearLayout
+                    android:id="@+id/layoutIndoorBikeSimulationParameters"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="18dp"
+                    android:orientation="vertical">
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginBottom="18dp"
+                        android:background="@color/simulator_line" />
 
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:fontFamily="sans-serif-condensed"
                         android:letterSpacing="0.08"
-                        android:text="EXTENSIONS"
+                        android:text="REMOTE CONTROL — BIKE SIMULATION TARGET"
                         android:textAllCaps="true"
                         android:textColor="@color/simulator_moss"
                         android:textSize="13sp"
@@ -308,492 +481,98 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="6dp"
-                        android:text="Locally attached provider modules can add simulator profiles here without changing the public app."
+                        android:text="Read-only Control Point state. These values arrive from a client and are echoed through Fitness Machine Status; they are never measurement inputs."
                         android:textColor="@color/simulator_ink_muted"
-                        android:textSize="14sp" />
+                        android:textSize="13sp" />
 
-                    <GridLayout
-                        android:id="@+id/gridExtensionProfiles"
+                    <TextView
+                        android:id="@+id/textIndoorBikeSimulationState"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="12dp"
-                        android:columnCount="2" />
+                        android:fontFamily="monospace"
+                        android:text="No bike simulation target received"
+                        android:textColor="@color/simulator_ink"
+                        android:textSize="13sp" />
                 </LinearLayout>
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/cardControls"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="18dp"
-            app:cardBackgroundColor="@color/simulator_panel_alt"
-            app:cardCornerRadius="28dp"
-            app:cardElevation="0dp"
-            app:strokeColor="@color/simulator_line"
-            app:strokeWidth="1dp">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="20dp">
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:fontFamily="sans-serif-condensed"
-                    android:letterSpacing="0.08"
-                    android:text="LIVE DATA"
-                    android:textAllCaps="true"
-                    android:textColor="@color/simulator_moss"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/textFeatureBitExplanation"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:text="Each active service has its own emitted measurement values. Use this to simulate small discrepancies between services, for example FTMS power and Cycling Power watts not matching exactly."
-                    android:textColor="@color/simulator_ink_muted"
-                    android:textSize="13sp" />
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="18dp"
-                    android:fontFamily="sans-serif-condensed"
-                    android:letterSpacing="0.08"
-                    android:text="FTMS SERVICE VALUES"
-                    android:textAllCaps="true"
-                    android:textColor="@color/simulator_moss"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/labelSpeedValue"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
-                    android:text="Speed 25.0 km/h"
-                    android:textColor="@color/simulator_ink"
-                    android:textSize="16sp"
-                    android:textStyle="bold" />
-
-                <com.google.android.material.slider.Slider
-                    android:id="@+id/sliderSpeed"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:value="25"
-                    android:valueFrom="0"
-                    android:valueTo="60"
-                    android:stepSize="0.5" />
-
-                <LinearLayout
-                    android:id="@+id/layoutSpeedFieldToggles"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:visibility="gone" />
-
-                <TextView
-                    android:id="@+id/labelCadenceValue"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="Cadence 80 rpm"
-                    android:textColor="@color/simulator_ink"
-                    android:textSize="16sp"
-                    android:textStyle="bold" />
-
-                <com.google.android.material.slider.Slider
-                    android:id="@+id/sliderCadence"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:value="80"
-                    android:valueFrom="0"
-                    android:valueTo="180"
-                    android:stepSize="1" />
-
-                <LinearLayout
-                    android:id="@+id/layoutCadenceFieldToggles"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:visibility="gone" />
-
-                <TextView
-                    android:id="@+id/labelPowerValue"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="FTMS power 150 W"
-                    android:textColor="@color/simulator_ink"
-                    android:textSize="16sp"
-                    android:textStyle="bold" />
-
-                <com.google.android.material.slider.Slider
-                    android:id="@+id/sliderPower"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:value="150"
-                    android:valueFrom="0"
-                    android:valueTo="1000"
-                    android:stepSize="5" />
-
-                <LinearLayout
-                    android:id="@+id/layoutPowerFieldToggles"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:visibility="gone" />
-
-                <TextView
-                    android:id="@+id/labelResistanceValue"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="Resistance 20"
-                    android:textColor="@color/simulator_ink"
-                    android:textSize="16sp"
-                    android:textStyle="bold" />
-
-                <com.google.android.material.slider.Slider
-                    android:id="@+id/sliderResistance"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:value="20"
-                    android:valueFrom="0"
-                    android:valueTo="100"
-                    android:stepSize="1" />
-
-                <LinearLayout
-                    android:id="@+id/layoutResistanceFieldToggles"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:visibility="gone" />
-
-                <TextView
-                    android:id="@+id/labelInclinationValue"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="Inclination 0.0%"
-                    android:textColor="@color/simulator_ink"
-                    android:textSize="16sp"
-                    android:textStyle="bold" />
-
-                <com.google.android.material.slider.Slider
-                    android:id="@+id/sliderInclination"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:value="0"
-                    android:valueFrom="-20"
-                    android:valueTo="20"
-                    android:stepSize="0.5" />
-
-                <LinearLayout
-                    android:id="@+id/layoutInclinationFieldToggles"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:visibility="gone" />
-
-                <TextView
-                    android:id="@+id/labelHeartRateValue"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="Heart rate 120 bpm"
-                    android:textColor="@color/simulator_ink"
-                    android:textSize="16sp"
-                    android:textStyle="bold" />
-
-                <com.google.android.material.slider.Slider
-                    android:id="@+id/sliderHeartRate"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:value="120"
-                    android:valueFrom="40"
-                    android:valueTo="220"
-                    android:stepSize="1" />
-
-                <com.google.android.material.switchmaterial.SwitchMaterial
-                    android:id="@+id/switchHeartRate"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:checked="true"
-                    android:text="Feature/data: Heart Rate"
-                    android:textColor="@color/simulator_ink" />
-
-                <LinearLayout
-                    android:id="@+id/layoutHeartRateFieldToggles"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:visibility="gone" />
-
-                <TextView
-                    android:id="@+id/labelMetabolicEquivalentValue"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="Metabolic equivalent 8.0 MET"
-                    android:textColor="@color/simulator_ink"
-                    android:textSize="16sp"
-                    android:textStyle="bold" />
-
-                <com.google.android.material.slider.Slider
-                    android:id="@+id/sliderMetabolicEquivalent"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:value="8"
-                    android:valueFrom="0"
-                    android:valueTo="25"
-                    android:stepSize="0.1" />
-
-                <LinearLayout
-                    android:id="@+id/layoutMetabolicFieldToggles"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:visibility="gone" />
-
-                <TextView
-                    android:id="@+id/labelTargetDurationValue"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="Target duration 30 min"
-                    android:textColor="@color/simulator_ink"
-                    android:textSize="16sp"
-                    android:textStyle="bold" />
-
-                <com.google.android.material.slider.Slider
-                    android:id="@+id/sliderTargetDuration"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:value="30"
-                    android:valueFrom="1"
-                    android:valueTo="240"
-                    android:stepSize="1" />
-
-                <LinearLayout
-                    android:id="@+id/layoutDurationFieldToggles"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:visibility="gone" />
 
                 <TextView
                     android:id="@+id/textIndoorBikeComputed"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
+                    android:layout_marginTop="8dp"
                     android:fontFamily="monospace"
                     android:text="Avg 0.0 km/h | 0 m | 0 s | 0 kcal"
                     android:textColor="@color/simulator_ink_muted"
                     android:textSize="13sp" />
 
-                <LinearLayout
-                    android:id="@+id/layoutCscLiveData"
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="18dp"
+                    android:background="@color/simulator_line" />
+
+                <TextView
+                    android:id="@+id/textFtmsMeasurementPacketTitle"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="18dp"
-                    android:background="@drawable/simulator_toggle_group"
-                    android:orientation="vertical"
-                    android:padding="12dp">
+                    android:fontFamily="sans-serif-condensed"
+                    android:letterSpacing="0.08"
+                    android:text="MEASUREMENT PACKET PREVIEW"
+                    android:textAllCaps="true"
+                    android:textColor="@color/simulator_moss"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
 
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:fontFamily="sans-serif-condensed"
-                        android:letterSpacing="0.08"
-                        android:text="CSC SERVICE VALUES"
-                        android:textAllCaps="true"
-                        android:textColor="@color/simulator_moss"
-                        android:textSize="13sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:id="@+id/labelCscSpeedValue"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
-                        android:text="CSC speed 25.0 km/h"
-                        android:textColor="@color/simulator_ink"
-                        android:textSize="16sp"
-                        android:textStyle="bold" />
-
-                    <com.google.android.material.slider.Slider
-                        android:id="@+id/sliderCscSpeed"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:value="25"
-                        android:valueFrom="0"
-                        android:valueTo="60"
-                        android:stepSize="0.5" />
-
-                    <TextView
-                        android:id="@+id/labelCscCadenceValue"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="CSC cadence 80 rpm"
-                        android:textColor="@color/simulator_ink"
-                        android:textSize="16sp"
-                        android:textStyle="bold" />
-
-                    <com.google.android.material.slider.Slider
-                        android:id="@+id/sliderCscCadence"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:value="80"
-                        android:valueFrom="0"
-                        android:valueTo="180"
-                        android:stepSize="1" />
-                </LinearLayout>
-
-                <LinearLayout
-                    android:id="@+id/layoutCyclingPowerLiveData"
+                <TextView
+                    android:id="@+id/textFtmsMeasurementPackets"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:background="@drawable/simulator_toggle_group"
-                    android:orientation="vertical"
-                    android:padding="12dp">
+                    android:layout_marginTop="8dp"
+                    android:fontFamily="monospace"
+                    android:text="Waiting for the first FTMS measurement record…"
+                    android:textColor="@color/simulator_ink_muted"
+                    android:textIsSelectable="true"
+                    android:textSize="12sp" />
 
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:fontFamily="sans-serif-condensed"
-                        android:letterSpacing="0.08"
-                        android:text="CYCLING POWER SERVICE VALUES"
-                        android:textAllCaps="true"
-                        android:textColor="@color/simulator_moss"
-                        android:textSize="13sp"
-                        android:textStyle="bold" />
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="18dp"
+                    android:background="@color/simulator_line" />
 
-                    <TextView
-                        android:id="@+id/labelCyclingPowerValue"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
-                        android:text="Cycling Power 152 W"
-                        android:textColor="@color/simulator_ink"
-                        android:textSize="16sp"
-                        android:textStyle="bold" />
-
-                    <com.google.android.material.slider.Slider
-                        android:id="@+id/sliderCyclingPower"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:value="152"
-                        android:valueFrom="0"
-                        android:valueTo="1000"
-                        android:stepSize="1" />
-
-                    <TextView
-                        android:id="@+id/labelCyclingPowerSpeedValue"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="Cycling Power wheel speed 25.0 km/h"
-                        android:textColor="@color/simulator_ink"
-                        android:textSize="16sp"
-                        android:textStyle="bold" />
-
-                    <com.google.android.material.slider.Slider
-                        android:id="@+id/sliderCyclingPowerSpeed"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:value="25"
-                        android:valueFrom="0"
-                        android:valueTo="60"
-                        android:stepSize="0.5" />
-
-                    <TextView
-                        android:id="@+id/labelCyclingPowerCadenceValue"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="Cycling Power cadence 80 rpm"
-                        android:textColor="@color/simulator_ink"
-                        android:textSize="16sp"
-                        android:textStyle="bold" />
-
-                    <com.google.android.material.slider.Slider
-                        android:id="@+id/sliderCyclingPowerCadence"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:value="80"
-                        android:valueFrom="0"
-                        android:valueTo="180"
-                        android:stepSize="1" />
-                </LinearLayout>
-
-                <LinearLayout
-                    android:id="@+id/layoutRscLiveData"
+                <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:background="@drawable/simulator_toggle_group"
-                    android:orientation="vertical"
-                    android:padding="12dp">
+                    android:layout_marginTop="18dp"
+                    android:fontFamily="sans-serif-condensed"
+                    android:letterSpacing="0.08"
+                    android:text="FTMS PROTOCOL EVENTS"
+                    android:textAllCaps="true"
+                    android:textColor="@color/simulator_moss"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
 
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:fontFamily="sans-serif-condensed"
-                        android:letterSpacing="0.08"
-                        android:text="RSC SERVICE VALUES"
-                        android:textAllCaps="true"
-                        android:textColor="@color/simulator_moss"
-                        android:textSize="13sp"
-                        android:textStyle="bold" />
+                <TextView
+                    android:id="@+id/textFtmsProtocolEvents"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:fontFamily="monospace"
+                    android:text="No Control Point, Fitness Machine Status, or Training Status traffic yet."
+                    android:textColor="@color/simulator_ink_muted"
+                    android:textIsSelectable="true"
+                    android:textSize="12sp" />
 
-                    <TextView
-                        android:id="@+id/labelRscSpeedValue"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
-                        android:text="RSC speed 2.8 m/s"
-                        android:textColor="@color/simulator_ink"
-                        android:textSize="16sp"
-                        android:textStyle="bold" />
-
-                    <com.google.android.material.slider.Slider
-                        android:id="@+id/sliderRscSpeed"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:value="2.8"
-                        android:valueFrom="0"
-                        android:valueTo="10"
-                        android:stepSize="0.1" />
-
-                    <TextView
-                        android:id="@+id/labelRscCadenceValue"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="RSC cadence 80 spm"
-                        android:textColor="@color/simulator_ink"
-                        android:textSize="16sp"
-                        android:textStyle="bold" />
-
-                    <com.google.android.material.slider.Slider
-                        android:id="@+id/sliderRscCadence"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:value="80"
-                        android:valueFrom="0"
-                        android:valueTo="220"
-                        android:stepSize="1" />
-                </LinearLayout>
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/buttonClearFtmsEvents"
+                    style="@style/Widget.MaterialComponents.Button.TextButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="end"
+                    android:layout_marginTop="4dp"
+                    android:text="Clear events" />
 
                 <LinearLayout
                     android:id="@+id/layoutFtmsControlCapability"
@@ -802,24 +581,22 @@
                     android:layout_marginTop="18dp"
                     android:orientation="vertical">
 
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginBottom="18dp"
+                        android:background="@color/simulator_line" />
+
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:fontFamily="sans-serif-condensed"
                         android:letterSpacing="0.08"
-                        android:text="CONTROL POINT + READABLE CAPABILITIES"
+                        android:text="PROTOCOL CONFIGURATION — CONTROL POINT"
                         android:textAllCaps="true"
                         android:textColor="@color/simulator_moss"
                         android:textSize="13sp"
                         android:textStyle="bold" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:text="These do not change emitted measurement packets. Actual control toggles gate Control Point writes; Declared bit toggles set target-setting bits clients read from Fitness Machine Feature."
-                        android:textColor="@color/simulator_ink_muted"
-                        android:textSize="13sp" />
 
                     <com.google.android.material.switchmaterial.SwitchMaterial
                         android:id="@+id/switchFtmsControlPoint"
@@ -839,116 +616,6 @@
                 </LinearLayout>
 
                 <LinearLayout
-                    android:id="@+id/layoutIndoorBikeFieldControls"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="18dp"
-                    android:orientation="vertical"
-                    android:visibility="gone">
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:fontFamily="sans-serif-condensed"
-                        android:letterSpacing="0.08"
-                        android:text="INDOOR BIKE PACKET FIELDS"
-                        android:textAllCaps="true"
-                        android:textColor="@color/simulator_moss"
-                        android:textSize="13sp"
-                        android:textStyle="bold" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:text="Instantaneous speed is required in normal Indoor Bike Data packets and is always included."
-                        android:textColor="@color/simulator_ink_muted"
-                        android:textSize="13sp" />
-
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchBikeAverageSpeed"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
-                        android:text="Average Speed"
-                        android:textColor="@color/simulator_ink" />
-
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchBikeInstantCadence"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:checked="true"
-                        android:text="Instantaneous Cadence"
-                        android:textColor="@color/simulator_ink" />
-
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchBikeAverageCadence"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Average Cadence"
-                        android:textColor="@color/simulator_ink" />
-
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchBikeTotalDistance"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:checked="true"
-                        android:text="Total Distance"
-                        android:textColor="@color/simulator_ink" />
-
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchBikeResistance"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Resistance Level"
-                        android:textColor="@color/simulator_ink" />
-
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchBikeInstantPower"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:checked="true"
-                        android:text="Instantaneous Power"
-                        android:textColor="@color/simulator_ink" />
-
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchBikeAveragePower"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Average Power"
-                        android:textColor="@color/simulator_ink" />
-
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchBikeExpendedEnergy"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Expended Energy"
-                        android:textColor="@color/simulator_ink" />
-
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchBikeMetabolicEquivalent"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Metabolic Equivalent"
-                        android:textColor="@color/simulator_ink" />
-
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchBikeElapsedTime"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:checked="true"
-                        android:text="Elapsed Time"
-                        android:textColor="@color/simulator_ink" />
-
-                    <com.google.android.material.switchmaterial.SwitchMaterial
-                        android:id="@+id/switchBikeRemainingTime"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Remaining Time"
-                        android:textColor="@color/simulator_ink" />
-                </LinearLayout>
-
-                <LinearLayout
                     android:id="@+id/layoutMachineFieldControls"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -956,26 +623,31 @@
                     android:orientation="vertical"
                     android:visibility="gone">
 
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginBottom="18dp"
+                        android:background="@color/simulator_line" />
+
                     <TextView
-                        android:id="@+id/textMachineFieldHeader"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:fontFamily="sans-serif-condensed"
                         android:letterSpacing="0.08"
-                        android:text="FTMS PACKET FIELDS"
+                        android:text="PROTOCOL CONFIGURATION — MEASUREMENT FIELDS"
                         android:textAllCaps="true"
                         android:textColor="@color/simulator_moss"
                         android:textSize="13sp"
                         android:textStyle="bold" />
 
-                    <TextView
-                        android:id="@+id/textMachineFieldDescription"
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/switchHeartRate"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:text="Mandatory base fields are always included in normal FTMS data records."
-                        android:textColor="@color/simulator_ink_muted"
-                        android:textSize="13sp" />
+                        android:layout_marginTop="10dp"
+                        android:checked="true"
+                        android:text="Feature/data: Heart Rate"
+                        android:textColor="@color/simulator_ink" />
 
                     <LinearLayout
                         android:id="@+id/layoutMachineFieldToggleList"
@@ -985,192 +657,105 @@
                         android:orientation="vertical" />
                 </LinearLayout>
             </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/cardDeviceState"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="18dp"
-            app:cardBackgroundColor="@color/simulator_ink"
-            app:cardCornerRadius="28dp"
-            app:cardElevation="0dp">
-
             <LinearLayout
+                android:id="@+id/layoutCscLiveData"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:padding="20dp">
+                android:padding="14dp">
 
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:fontFamily="sans-serif-condensed"
                     android:letterSpacing="0.08"
-                    android:text="DEVICE STATE"
+                    android:text="CSC SERVICE VALUES"
                     android:textAllCaps="true"
-                    android:textColor="@color/simulator_lime"
+                    android:textColor="@color/simulator_moss"
                     android:textSize="13sp"
                     android:textStyle="bold" />
 
+                <TextView android:id="@+id/labelCscSpeedValue" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="CSC speed 25.0 km/h" android:textColor="@color/simulator_ink" android:textSize="16sp" android:textStyle="bold" />
+                <com.google.android.material.slider.Slider android:id="@+id/sliderCscSpeed" android:layout_width="match_parent" android:layout_height="wrap_content" android:value="25" android:valueFrom="0" android:valueTo="60" android:stepSize="0.5" />
+
+                <TextView android:id="@+id/labelCscCadenceValue" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="CSC cadence 80 rpm" android:textColor="@color/simulator_ink" android:textSize="16sp" android:textStyle="bold" />
+                <com.google.android.material.slider.Slider android:id="@+id/sliderCscCadence" android:layout_width="match_parent" android:layout_height="wrap_content" android:value="80" android:valueFrom="0" android:valueTo="180" android:stepSize="1" />
+
+                <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginTop="16dp" android:layout_marginBottom="14dp" android:background="@color/simulator_line" />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:fontFamily="sans-serif-condensed" android:letterSpacing="0.08" android:text="MEASUREMENT NOTIFICATIONS" android:textAllCaps="true" android:textColor="@color/simulator_moss" android:textSize="13sp" android:textStyle="bold" />
+                <TextView android:id="@+id/textCscMeasurementPreview" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:fontFamily="monospace" android:text="Waiting for CSC Measurement…" android:textColor="@color/simulator_ink_muted" android:textIsSelectable="true" android:textSize="12sp" />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:fontFamily="sans-serif-condensed" android:letterSpacing="0.08" android:text="CONTROL POINT EVENTS" android:textAllCaps="true" android:textColor="@color/simulator_moss" android:textSize="13sp" android:textStyle="bold" />
+                <TextView android:id="@+id/textCscProtocolEvents" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:fontFamily="monospace" android:text="No CSC Control Point traffic yet." android:textColor="@color/simulator_ink_muted" android:textIsSelectable="true" android:textSize="12sp" />
+                <LinearLayout android:id="@+id/layoutCscProtocolControls" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:orientation="vertical" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/layoutCyclingPowerLiveData"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="14dp">
+
                 <TextView
-                    android:id="@+id/textDeviceStateTitle"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
-                    android:text="Workout idle"
-                    android:textColor="@color/white"
-                    android:textSize="25sp"
+                    android:fontFamily="sans-serif-condensed"
+                    android:letterSpacing="0.08"
+                    android:text="CYCLING POWER SERVICE VALUES"
+                    android:textAllCaps="true"
+                    android:textColor="@color/simulator_moss"
+                    android:textSize="13sp"
                     android:textStyle="bold" />
 
-                <TextView
-                    android:id="@+id/textDeviceStateSubtitle"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:text="Control Point is available. No client owns the machine yet."
-                    android:textColor="#C8D7C2"
-                    android:textSize="14sp" />
+                <TextView android:id="@+id/labelCyclingPowerValue" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="Cycling Power 152 W" android:textColor="@color/simulator_ink" android:textSize="16sp" android:textStyle="bold" />
+                <com.google.android.material.slider.Slider android:id="@+id/sliderCyclingPower" android:layout_width="match_parent" android:layout_height="wrap_content" android:value="152" android:valueFrom="0" android:valueTo="1000" android:stepSize="1" />
 
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="18dp"
-                    android:orientation="horizontal"
-                    android:weightSum="2">
+                <TextView android:id="@+id/labelCyclingPowerSpeedValue" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="Cycling Power wheel speed 25.0 km/h" android:textColor="@color/simulator_ink" android:textSize="16sp" android:textStyle="bold" />
+                <com.google.android.material.slider.Slider android:id="@+id/sliderCyclingPowerSpeed" android:layout_width="match_parent" android:layout_height="wrap_content" android:value="25" android:valueFrom="0" android:valueTo="60" android:stepSize="0.5" />
 
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical">
+                <TextView android:id="@+id/labelCyclingPowerCadenceValue" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="Cycling Power cadence 80 rpm" android:textColor="@color/simulator_ink" android:textSize="16sp" android:textStyle="bold" />
+                <com.google.android.material.slider.Slider android:id="@+id/sliderCyclingPowerCadence" android:layout_width="match_parent" android:layout_height="wrap_content" android:value="80" android:valueFrom="0" android:valueTo="180" android:stepSize="1" />
 
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:fontFamily="sans-serif-condensed"
-                            android:letterSpacing="0.08"
-                            android:text="CONTROL POINT"
-                            android:textAllCaps="true"
-                            android:textColor="@color/simulator_lime"
-                            android:textSize="11sp"
-                            android:textStyle="bold" />
-
-                        <TextView
-                            android:id="@+id/textControlPointState"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="4dp"
-                            android:text="Available"
-                            android:textColor="@color/white"
-                            android:textSize="17sp"
-                            android:textStyle="bold" />
-                    </LinearLayout>
-
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical">
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:fontFamily="sans-serif-condensed"
-                            android:letterSpacing="0.08"
-                            android:text="WORKOUT"
-                            android:textAllCaps="true"
-                            android:textColor="@color/simulator_lime"
-                            android:textSize="11sp"
-                            android:textStyle="bold" />
-
-                        <TextView
-                            android:id="@+id/textWorkoutState"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="4dp"
-                            android:text="Idle"
-                            android:textColor="@color/white"
-                            android:textSize="17sp"
-                            android:textStyle="bold" />
-                    </LinearLayout>
-                </LinearLayout>
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="18dp"
-                    android:orientation="horizontal"
-                    android:weightSum="2">
-
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical">
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:fontFamily="sans-serif-condensed"
-                            android:letterSpacing="0.08"
-                            android:text="TRAINING STATUS"
-                            android:textAllCaps="true"
-                            android:textColor="@color/simulator_lime"
-                            android:textSize="11sp"
-                            android:textStyle="bold" />
-
-                        <TextView
-                            android:id="@+id/textTrainingStatusState"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="4dp"
-                            android:text="Idle"
-                            android:textColor="@color/white"
-                            android:textSize="17sp"
-                            android:textStyle="bold" />
-                    </LinearLayout>
-
-                    <LinearLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:orientation="vertical">
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:fontFamily="sans-serif-condensed"
-                            android:letterSpacing="0.08"
-                            android:text="MACHINE"
-                            android:textAllCaps="true"
-                            android:textColor="@color/simulator_lime"
-                            android:textSize="11sp"
-                            android:textStyle="bold" />
-
-                        <TextView
-                            android:id="@+id/textMachineModeState"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginTop="4dp"
-                            android:text="Indoor Bike"
-                            android:textColor="@color/white"
-                            android:textSize="17sp"
-                            android:textStyle="bold" />
-                    </LinearLayout>
-                </LinearLayout>
-
-                <TextView
-                    android:id="@+id/textProcedureState"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="18dp"
-                    android:fontFamily="monospace"
-                    android:text="Procedure: ready"
-                    android:textColor="#E8EAD8"
-                    android:textSize="13sp" />
+                <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginTop="16dp" android:layout_marginBottom="14dp" android:background="@color/simulator_line" />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:fontFamily="sans-serif-condensed" android:letterSpacing="0.08" android:text="MEASUREMENT &amp; VECTOR NOTIFICATIONS" android:textAllCaps="true" android:textColor="@color/simulator_moss" android:textSize="13sp" android:textStyle="bold" />
+                <TextView android:id="@+id/textCyclingPowerMeasurementPreview" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:fontFamily="monospace" android:text="Waiting for Cycling Power Measurement…" android:textColor="@color/simulator_ink_muted" android:textIsSelectable="true" android:textSize="12sp" />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:fontFamily="sans-serif-condensed" android:letterSpacing="0.08" android:text="CONTROL POINT EVENTS" android:textAllCaps="true" android:textColor="@color/simulator_moss" android:textSize="13sp" android:textStyle="bold" />
+                <TextView android:id="@+id/textCyclingPowerProtocolEvents" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:fontFamily="monospace" android:text="No Cycling Power Control Point traffic yet." android:textColor="@color/simulator_ink_muted" android:textIsSelectable="true" android:textSize="12sp" />
+                <LinearLayout android:id="@+id/layoutCyclingPowerProtocolControls" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:orientation="vertical" />
             </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
 
+            <LinearLayout
+                android:id="@+id/layoutRscLiveData"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="14dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="sans-serif-condensed"
+                    android:letterSpacing="0.08"
+                    android:text="RSC SERVICE VALUES"
+                    android:textAllCaps="true"
+                    android:textColor="@color/simulator_moss"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <TextView android:id="@+id/labelRscSpeedValue" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="RSC speed 2.8 m/s" android:textColor="@color/simulator_ink" android:textSize="16sp" android:textStyle="bold" />
+                <com.google.android.material.slider.Slider android:id="@+id/sliderRscSpeed" android:layout_width="match_parent" android:layout_height="wrap_content" android:value="2.8" android:valueFrom="0" android:valueTo="10" android:stepSize="0.1" />
+
+                <TextView android:id="@+id/labelRscCadenceValue" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="RSC cadence 80 spm" android:textColor="@color/simulator_ink" android:textSize="16sp" android:textStyle="bold" />
+                <com.google.android.material.slider.Slider android:id="@+id/sliderRscCadence" android:layout_width="match_parent" android:layout_height="wrap_content" android:value="80" android:valueFrom="0" android:valueTo="220" android:stepSize="1" />
+
+                <View android:layout_width="match_parent" android:layout_height="1dp" android:layout_marginTop="16dp" android:layout_marginBottom="14dp" android:background="@color/simulator_line" />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:fontFamily="sans-serif-condensed" android:letterSpacing="0.08" android:text="MEASUREMENT NOTIFICATIONS" android:textAllCaps="true" android:textColor="@color/simulator_moss" android:textSize="13sp" android:textStyle="bold" />
+                <TextView android:id="@+id/textRscMeasurementPreview" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:fontFamily="monospace" android:text="Waiting for RSC Measurement…" android:textColor="@color/simulator_ink_muted" android:textIsSelectable="true" android:textSize="12sp" />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:fontFamily="sans-serif-condensed" android:letterSpacing="0.08" android:text="CONTROL POINT EVENTS" android:textAllCaps="true" android:textColor="@color/simulator_moss" android:textSize="13sp" android:textStyle="bold" />
+                <TextView android:id="@+id/textRscProtocolEvents" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:fontFamily="monospace" android:text="No RSC Control Point traffic yet." android:textColor="@color/simulator_ink_muted" android:textIsSelectable="true" android:textSize="12sp" />
+                <LinearLayout android:id="@+id/layoutRscProtocolControls" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:orientation="vertical" />
+            </LinearLayout>
+        </LinearLayout>
 
         <TextView
             android:layout_width="match_parent"

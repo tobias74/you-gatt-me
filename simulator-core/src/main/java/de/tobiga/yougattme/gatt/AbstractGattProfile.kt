@@ -15,6 +15,7 @@ import java.util.*
  */
 abstract class AbstractGattProfile() {
     var bluetoothGattServer: BluetoothGattServer? = null
+    private val negotiatedMtuByAddress = mutableMapOf<String, Int>()
 
     // This remains the same.
     val activeCharacteristics = mutableSetOf<BaseGattCharacteristic>()
@@ -30,7 +31,25 @@ abstract class AbstractGattProfile() {
     }
 
     open fun onDeviceConnected(device: BluetoothDevice) {
+        negotiatedMtuByAddress[device.address] = DEFAULT_ATT_MTU
         Log.d("AbstractGattProfile", "Device connected: $device")
+    }
+
+    open fun onMtuChanged(device: BluetoothDevice, mtu: Int) {
+        negotiatedMtuByAddress[device.address] = mtu.coerceAtLeast(DEFAULT_ATT_MTU)
+    }
+
+    fun getNotificationPayloadSize(device: BluetoothDevice): Int {
+        return ((negotiatedMtuByAddress[device.address] ?: DEFAULT_ATT_MTU) - ATT_NOTIFICATION_OVERHEAD)
+            .coerceAtLeast(1)
+    }
+
+    protected fun forgetDeviceMtu(device: BluetoothDevice) {
+        negotiatedMtuByAddress.remove(device.address)
+    }
+
+    protected fun clearDeviceMtus() {
+        negotiatedMtuByAddress.clear()
     }
 
     abstract fun createServices(gattServer: BluetoothGattServer): List<BluetoothGattService>
@@ -74,5 +93,10 @@ abstract class AbstractGattProfile() {
         val myCharacteristic = activeCharacteristics.find { it.getCharacteristicUUID() == descriptor.characteristic.uuid }
         myCharacteristic?.getTobigaDescriptorByUUID(descriptor.uuid)?.onWriteRequest(device, requestId, preparedWrite, responseNeeded, offset, value)
         return myCharacteristic != null
+    }
+
+    private companion object {
+        const val DEFAULT_ATT_MTU = 23
+        const val ATT_NOTIFICATION_OVERHEAD = 3
     }
 }

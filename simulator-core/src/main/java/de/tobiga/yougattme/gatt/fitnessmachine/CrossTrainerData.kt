@@ -147,8 +147,8 @@ class CrossTrainerData {
         return (angleDegrees * 10.0).roundToFtmsSInt16()
     }
 
-    fun getResistanceLevelTenths(): Int {
-        return (resistanceLevel * 10).ftmsSInt16()
+    fun getResistanceLevelRaw(): Int {
+        return (resistanceLevel * 10).ftmsUInt8()
     }
 
     fun getInstantaneousPowerWatt(): Int {

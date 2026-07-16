@@ -4,7 +4,7 @@ import kotlin.math.floor
 
 class CyclingMeasurementSimulator {
 
-    private val WHEEL_CIRCUMFERENCE = 2.07f // in meters
+    private var wheelCircumference = 2.07f // in meters
     private val MAX_WHEEL_REVOLUTIONS = 4294967295L // 0xFFFFFFFF (32-bit max value)
     private val MAX_CRANK_REVOLUTIONS = 65535L // 0xFFFF (16-bit max value)
 
@@ -33,7 +33,7 @@ class CyclingMeasurementSimulator {
         maxRevolutions: Long,
         currentTimeStamp: Long,
         durationMillis: Long = -1,
-        componentName: String
+        rollsOver: Boolean
     ): SimulationResult {
         // Initialize timestamp if this is the first call
         if (lastEventTimestamp == 0L) {
@@ -57,7 +57,11 @@ class CyclingMeasurementSimulator {
         }
 
         // Determine simulation duration
-        val actualDurationMillis = currentTimeStamp - lastEventTimestamp
+        val actualDurationMillis = if (durationMillis >= 0) {
+            durationMillis
+        } else {
+            (currentTimeStamp - lastEventTimestamp).coerceAtLeast(0)
+        }
 
         // Calculate rotation progress during this period
         val rotationProgress = revolutionsPerSecond * (actualDurationMillis / 1000.0)
@@ -76,14 +80,17 @@ class CyclingMeasurementSimulator {
 
         // Handle overflow according to CSC specification
         if (newCumulativeRevolutions > maxRevolutions) {
-            newCumulativeRevolutions -= (maxRevolutions + 1)
+            newCumulativeRevolutions = if (rollsOver) {
+                newCumulativeRevolutions % (maxRevolutions + 1)
+            } else {
+                maxRevolutions.toDouble()
+            }
         }
 
         // Calculate the timestamp for when the revolutions complete
         val newTimestamp = if (fullRevolutions > 0) {
             // If revolutions occurred, calculate when they would have finished
-            val timeForRevolutions = (fullRevolutions / revolutionsPerSecond) * 1000.0
-            lastEventTimestamp + timeForRevolutions.toLong()
+            currentTimeStamp - (newPosition / revolutionsPerSecond * 1000.0).toLong()
         } else {
             // If no revolutions occurred, keep the last timestamp
             lastEventTimestamp
@@ -105,7 +112,7 @@ class CyclingMeasurementSimulator {
 
     fun simulateWheel(velocity: Double, durationMillis: Long = -1, currentTimeMillis: Long = System.currentTimeMillis()): Int {
         // Convert velocity to wheel revolutions per second
-        val wheelRevolutionsPerSecond = velocity / WHEEL_CIRCUMFERENCE
+        val wheelRevolutionsPerSecond = velocity / wheelCircumference
 
         val result = simulateRotation(
             revolutionsPerSecond = wheelRevolutionsPerSecond,
@@ -115,7 +122,7 @@ class CyclingMeasurementSimulator {
             maxRevolutions = MAX_WHEEL_REVOLUTIONS,
             currentTimeStamp = currentTimeMillis,
             durationMillis = durationMillis,
-            componentName = "wheel"
+            rollsOver = false
         )
 
         // Update state
@@ -138,7 +145,7 @@ class CyclingMeasurementSimulator {
             maxRevolutions = MAX_CRANK_REVOLUTIONS,
             currentTimeStamp = currentTimeMillis,
             durationMillis = durationMillis,
-            componentName = "crank"
+            rollsOver = true
         )
 
         // Update state
@@ -161,8 +168,8 @@ class CyclingMeasurementSimulator {
     }
 
     // Getters for wheel revolution data (for CSC service)
-    fun getCumulativeWheelRevolutions(): Int {
-        return cumulativeWheelRevolutions.toInt()
+    fun getCumulativeWheelRevolutions(): Long {
+        return cumulativeWheelRevolutions.toLong()
     }
 
     fun getLastWheelEventTimestamp(): Long {
@@ -211,6 +218,10 @@ class CyclingMeasurementSimulator {
     }
 
     fun setWheelCircumference(fl: Float) {
+        if (fl > 0f) wheelCircumference = fl
+    }
 
+    fun setCumulativeWheelRevolutions(value: Long) {
+        cumulativeWheelRevolutions = value.coerceIn(0, MAX_WHEEL_REVOLUTIONS).toDouble()
     }
 }

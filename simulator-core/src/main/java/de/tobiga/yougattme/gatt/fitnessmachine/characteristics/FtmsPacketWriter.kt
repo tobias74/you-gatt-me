@@ -24,6 +24,10 @@ internal class FtmsPacketWriter {
         u16(value)
     }
 
+    fun raw(value: ByteArray) {
+        data.addAll(value.toList())
+    }
+
     fun bytes(): ByteArray = data.toByteArray()
 }
 

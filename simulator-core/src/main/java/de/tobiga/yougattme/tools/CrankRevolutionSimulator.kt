@@ -5,47 +5,30 @@ import kotlin.math.floor
 class CrankRevolutionSimulator {
 
     private var cumulativeCrankRevolutions: Double = 0.0
-    private var leftOverMillis: Double = 0.0
+    private var crankPosition: Double = 0.0
     private var lastCrankEventTimestamp: Long = 0L
+    private var lastSimulationTimestamp: Long = 0L
 
     // Methods
     fun simulate(cadence: Int) {
-        if (lastCrankEventTimestamp > 0) {
+        val now = System.currentTimeMillis()
+        if (lastSimulationTimestamp == 0L) {
+            lastSimulationTimestamp = now
+            lastCrankEventTimestamp = now
+            return
+        }
+        val durationMillis = now - lastSimulationTimestamp
+        lastSimulationTimestamp = now
+        if (cadence <= 0) return
 
-            if (cadence == 0) {
-                lastCrankEventTimestamp = System.currentTimeMillis()
-                return
-            }
-
-
-            val availableMillisToTravel = leftOverMillis + (System.currentTimeMillis() - lastCrankEventTimestamp)
-
-            val crankRevolutionsPerSecond = cadence / 60.0
-
-            val crankRevolutionsSinceLastEvent = crankRevolutionsPerSecond * (availableMillisToTravel/1000)
-            val fullCrankRevolutionsSinceLastEvent = (floor(crankRevolutionsSinceLastEvent)).toInt()
-
-            val timeNeededForFullRevolutions = (fullCrankRevolutionsSinceLastEvent / crankRevolutionsPerSecond)
-
-            val excessRevolution = crankRevolutionsSinceLastEvent - fullCrankRevolutionsSinceLastEvent
-
-            leftOverMillis = (excessRevolution / crankRevolutionsPerSecond) * 1000
-
-            cumulativeCrankRevolutions += fullCrankRevolutionsSinceLastEvent
-
-            // Check if the value has exceeded the maximum allowed by the characteristic (0xFFFFFFFF)
-            if (cumulativeCrankRevolutions > 4294967295) {
-                cumulativeCrankRevolutions -= 4294967296
-            }
-
-            // Update the last wheel event time
-
-
-
-            lastCrankEventTimestamp += (timeNeededForFullRevolutions * 1000).toLong()
-
-        } else {
-            lastCrankEventTimestamp = System.currentTimeMillis()
+        val revolutionsPerSecond = cadence / 60.0
+        val totalPosition = crankPosition + revolutionsPerSecond * durationMillis / 1000.0
+        val fullRevolutions = floor(totalPosition).toInt()
+        crankPosition = totalPosition - fullRevolutions
+        cumulativeCrankRevolutions = (cumulativeCrankRevolutions + fullRevolutions) % 65536.0
+        if (fullRevolutions > 0) {
+            lastCrankEventTimestamp =
+                now - (crankPosition / revolutionsPerSecond * 1000.0).toLong()
         }
 
     }

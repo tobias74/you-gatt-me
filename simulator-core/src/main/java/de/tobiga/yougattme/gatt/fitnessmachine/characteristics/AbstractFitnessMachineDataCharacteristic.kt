@@ -9,6 +9,14 @@ abstract class AbstractFitnessMachineDataCharacteristic(
     gattProfile: AbstractGattProfile
 ) : AbstractDataMeasurementCharacteristic(gattProfile) {
 
+    internal abstract fun getFtmsDataRecord(): FtmsDataRecord
+
+    final override fun getData(): ByteArray = getFtmsDataRecord().encode().single()
+
+    final override fun getNotificationPackets(maxPayloadBytes: Int): List<ByteArray> {
+        return getFtmsDataRecord().encode(maxPayloadBytes)
+    }
+
     override fun onReadRequest(device: BluetoothDevice, requestId: Int, offset: Int) {
         gattProfile.bluetoothGattServer!!.sendResponse(
             device,
