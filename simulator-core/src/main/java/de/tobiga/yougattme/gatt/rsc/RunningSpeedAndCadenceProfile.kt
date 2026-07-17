@@ -12,6 +12,7 @@ import java.util.UUID
 class RunningSpeedAndCadenceProfile(
     private val viewModel: ApplicationViewModel
 ) : SingleServiceGattProfile() {
+    override val bridgeOutputKey: String = "rsc"
     private val measurementCharacteristic = RSCMeasurementCharacteristic(this, viewModel)
     private val featureCharacteristic = ReadOnlyValueCharacteristic(
         this,

@@ -15,6 +15,7 @@ class FitnessMachineProfile(
     val machineType: String,
     val mainViewModel: ApplicationViewModel
 ) : SingleServiceGattProfile() {
+    override val bridgeOutputKey: String = "ftms"
 
     private var dataCharacteristic: AbstractDataMeasurementCharacteristic
     private var controlPointCharacteristic: FitnessMachineControlPointCharacteristic? = null

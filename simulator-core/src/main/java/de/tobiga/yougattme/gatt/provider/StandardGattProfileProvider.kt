@@ -5,6 +5,7 @@ import de.tobiga.yougattme.gatt.csc.CyclingSpeedAndCadenceProfile
 import de.tobiga.yougattme.gatt.cyclingpower.CyclingPowerProfile
 import de.tobiga.yougattme.gatt.fitnessmachine.FitnessMachineProfile
 import de.tobiga.yougattme.gatt.rsc.RunningSpeedAndCadenceProfile
+import de.tobiga.yougattme.gatt.heartrate.HeartRateProfile
 
 class StandardGattProfileProvider : GattProfileProvider {
     override val providerId: String = "standard"
@@ -78,6 +79,13 @@ class StandardGattProfileProvider : GattProfileProvider {
             subtitle = "Running Speed and Cadence Measurement for treadmill/running clients.",
             serviceUuid = "0x1814 / measurement 0x2A53",
             selectionMode = ProfileSelectionMode.OPTIONAL_SERVICE
+        ),
+        GattProfileDefinition(
+            key = "heart_rate",
+            title = "Heart Rate",
+            subtitle = "Heart Rate Measurement, Body Sensor Location, and Heart Rate Control Point.",
+            serviceUuid = "0x180D / measurement 0x2A37",
+            selectionMode = ProfileSelectionMode.OPTIONAL_SERVICE
         )
     )
 
@@ -96,6 +104,7 @@ class StandardGattProfileProvider : GattProfileProvider {
             "csc" -> CyclingSpeedAndCadenceProfile(viewModel)
             "cycling_power" -> CyclingPowerProfile(viewModel)
             "rsc" -> RunningSpeedAndCadenceProfile(viewModel)
+            "heart_rate" -> HeartRateProfile(viewModel)
             else -> null
         }
     }

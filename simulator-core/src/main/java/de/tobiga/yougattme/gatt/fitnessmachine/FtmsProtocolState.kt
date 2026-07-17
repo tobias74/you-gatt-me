@@ -170,7 +170,7 @@ data class FtmsSupportedRanges(
 ) {
     fun speedRaw(valueKmh: Float): Int = (valueKmh * 100f).roundToFtmsUInt16()
     fun inclinationRaw(valuePercent: Float): Int = (valuePercent * 10f).roundToFtmsSInt16()
-    fun resistanceRaw(value: Float): Int = (value * 10f).roundToFtmsUInt8()
+    fun resistanceRaw(value: Float): Int = (value * 10f).roundToFtmsSInt16()
 
     fun supportsSpeedRaw(raw: Int): Boolean = supportsIncrement(
         raw,

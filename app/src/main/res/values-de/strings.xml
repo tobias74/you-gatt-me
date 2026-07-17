@@ -4,6 +4,9 @@
     <!-- Strings used for fragments for navigation -->
     <string name="next">Weiter</string>
     <string name="previous">Zur[ck</string>
+    <string name="hello_first_fragment">Hallo erstes Fragment</string>
+    <string name="hello_second_fragment">Hallo zweites Fragment. Argument: %1$s</string>
+    <string name="hello_blank_fragment">Hallo leeres Fragment</string>
 
     <string name="nav_header_subtitle">Cycling Power Gatt Service</string>
     <string name="nav_header_title">YouGattMe</string>
@@ -14,6 +17,14 @@
     <string name="menu_about">About</string>
     <string name="menu_home">Home</string>
     <string name="watts">Watts</string>
+    <string name="messages_header">Nachrichten</string>
+    <string name="sync_header">Synchronisierung</string>
+    <string name="signature_title">Deine Signatur</string>
+    <string name="reply_title">Standardaktion für Antworten</string>
+    <string name="sync_title">E-Mails regelmäßig synchronisieren</string>
+    <string name="attachment_title">Eingehende Anhänge herunterladen</string>
+    <string name="attachment_summary_on">Anhänge eingehender E-Mails automatisch herunterladen</string>
+    <string name="attachment_summary_off">Anhänge nur auf manuelle Anforderung herunterladen</string>
     <string name="menu_settings">Einstellungen</string>
     <string name="watts_settings_header">GATT Server</string>
     <string name="publish_interval_title">Aktualisierungs-Interval (ms)</string>
@@ -22,6 +33,8 @@
     <string name="no_bluetooth_support">Bluetooth wird nicht unterstützt...</string>
     <string name="bluetooth_will_be_enabled">Bluetooth wird aktiviert...</string>
     <string name="starting_services">Bluetooth ist aktiviert, Services werden gestartet...</string>
+    <string name="stopping_services">Services werden beendet...</string>
+    <string name="ok">OK</string>
     <string name="summary_publish_interval_preference">Der Wert wird erst nach dem Neustart des Gatt Servers verwendet</string>
     <string name="menu_rower_data">Rower Data</string>
     <string name="cycling_power_activated">Cycling Power</string>

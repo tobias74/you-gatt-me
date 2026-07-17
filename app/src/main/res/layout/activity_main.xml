@@ -133,6 +133,164 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            app:cardBackgroundColor="@color/simulator_panel"
+            app:cardCornerRadius="22dp"
+            app:cardElevation="0dp"
+            app:strokeColor="@color/simulator_line"
+            app:strokeWidth="1dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:id="@+id/headerInputDevices"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/simulator_accordion_item_closed"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:padding="18dp">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Input devices &amp; routing"
+                            android:textColor="@color/simulator_ink"
+                            android:textSize="18sp"
+                            android:textStyle="bold" />
+                        <TextView
+                            android:id="@+id/textBridgeSummary"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="3dp"
+                            android:text="Bridge starting"
+                            android:textColor="@color/simulator_ink_muted"
+                            android:textSize="13sp" />
+                    </LinearLayout>
+                    <ImageView
+                        android:id="@+id/iconInputDevicesExpand"
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:contentDescription="Expand input devices"
+                        android:src="@drawable/ic_accordion_chevron_right" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/contentInputDevices"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/simulator_accordion_body"
+                    android:orientation="vertical"
+                    android:padding="18dp"
+                    android:visibility="gone">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/buttonScanInputs"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Scan"
+                            android:textAllCaps="false" />
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/buttonStopInputScan"
+                            style="@style/Widget.MaterialComponents.Button.TextButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Stop scan"
+                            android:textAllCaps="false" />
+                    </LinearLayout>
+
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/switchShowAllBleDevices"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Show all BLE devices (including incomplete advertisements)"
+                        android:textColor="@color/simulator_ink" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:fontFamily="sans-serif-condensed"
+                        android:letterSpacing="0.08"
+                        android:text="DISCOVERED INPUTS"
+                        android:textColor="@color/simulator_moss"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+                    <LinearLayout
+                        android:id="@+id/layoutInputDeviceRows"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="18dp"
+                        android:fontFamily="sans-serif-condensed"
+                        android:letterSpacing="0.08"
+                        android:text="OUTPUT ROUTES"
+                        android:textColor="@color/simulator_moss"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="Each simulated service has an independent measurement source, field overrides and control destination."
+                        android:textColor="@color/simulator_ink_muted"
+                        android:textSize="12sp" />
+                    <LinearLayout
+                        android:id="@+id/layoutBridgeRoutes"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="18dp"
+                        android:fontFamily="sans-serif-condensed"
+                        android:letterSpacing="0.08"
+                        android:text="BRIDGE LOG"
+                        android:textColor="@color/simulator_moss"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+                    <TextView
+                        android:id="@+id/textBridgeLog"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:background="@drawable/simulator_log_panel"
+                        android:fontFamily="monospace"
+                        android:minHeight="96dp"
+                        android:padding="12dp"
+                        android:text="No bridge traffic yet."
+                        android:textColor="#D8E8C7"
+                        android:textSize="11sp" />
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -754,6 +912,27 @@
                 <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:fontFamily="sans-serif-condensed" android:letterSpacing="0.08" android:text="CONTROL POINT EVENTS" android:textAllCaps="true" android:textColor="@color/simulator_moss" android:textSize="13sp" android:textStyle="bold" />
                 <TextView android:id="@+id/textRscProtocolEvents" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:fontFamily="monospace" android:text="No RSC Control Point traffic yet." android:textColor="@color/simulator_ink_muted" android:textIsSelectable="true" android:textSize="12sp" />
                 <LinearLayout android:id="@+id/layoutRscProtocolControls" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:orientation="vertical" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/layoutHeartRateLiveData"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="14dp">
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:fontFamily="sans-serif-condensed" android:letterSpacing="0.08" android:text="HEART RATE SERVICE VALUES" android:textAllCaps="true" android:textColor="@color/simulator_moss" android:textSize="13sp" android:textStyle="bold" />
+                <TextView android:id="@+id/labelHeartRateServiceValue" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="Heart rate 120 bpm" android:textColor="@color/simulator_ink" android:textSize="16sp" android:textStyle="bold" />
+                <com.google.android.material.slider.Slider android:id="@+id/sliderHeartRateService" android:layout_width="match_parent" android:layout_height="wrap_content" android:value="120" android:valueFrom="30" android:valueTo="300" android:stepSize="1" />
+                <TextView android:id="@+id/labelHeartRateEnergyValue" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="Energy expended 0 kJ" android:textColor="@color/simulator_ink" android:textSize="15sp" />
+                <com.google.android.material.slider.Slider android:id="@+id/sliderHeartRateEnergy" android:layout_width="match_parent" android:layout_height="wrap_content" android:value="0" android:valueFrom="0" android:valueTo="5000" android:stepSize="1" />
+                <TextView android:id="@+id/labelHeartRateRrValue" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="RR interval 0.80 s" android:textColor="@color/simulator_ink" android:textSize="15sp" />
+                <com.google.android.material.slider.Slider android:id="@+id/sliderHeartRateRr" android:layout_width="match_parent" android:layout_height="wrap_content" android:value="0.8" android:valueFrom="0.25" android:valueTo="2" android:stepSize="0.01" />
+                <com.google.android.material.switchmaterial.SwitchMaterial android:id="@+id/switchHeartRateEnergy" android:layout_width="match_parent" android:layout_height="wrap_content" android:checked="true" android:text="Energy Expended present" android:textColor="@color/simulator_ink" />
+                <com.google.android.material.switchmaterial.SwitchMaterial android:id="@+id/switchHeartRateRr" android:layout_width="match_parent" android:layout_height="wrap_content" android:checked="true" android:text="RR-Interval present" android:textColor="@color/simulator_ink" />
+                <com.google.android.material.switchmaterial.SwitchMaterial android:id="@+id/switchHeartRateContact" android:layout_width="match_parent" android:layout_height="wrap_content" android:checked="true" android:text="Sensor contact supported and detected" android:textColor="@color/simulator_ink" />
+                <com.google.android.material.switchmaterial.SwitchMaterial android:id="@+id/switchHeartRateBodyLocation" android:layout_width="match_parent" android:layout_height="wrap_content" android:checked="true" android:text="Body Sensor Location characteristic" android:textColor="@color/simulator_ink" />
+                <com.google.android.material.switchmaterial.SwitchMaterial android:id="@+id/switchHeartRateControlPoint" android:layout_width="match_parent" android:layout_height="wrap_content" android:checked="true" android:text="Heart Rate Control Point characteristic" android:textColor="@color/simulator_ink" />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:text="The Heart Rate Control Point implements Reset Energy Expended. Characteristic-presence changes rebuild the downstream GATT surface." android:textColor="@color/simulator_ink_muted" android:textSize="12sp" />
             </LinearLayout>
         </LinearLayout>
 

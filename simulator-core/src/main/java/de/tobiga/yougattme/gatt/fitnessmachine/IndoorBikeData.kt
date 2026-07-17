@@ -95,7 +95,7 @@ class IndoorBikeData {
     }
 
     fun getResistanceLevelRaw(): Int {
-        return (resistanceLevel * 10f).roundToInt().coerceIn(0, UINT8_MAX)
+        return (resistanceLevel * 10f).roundToInt().coerceIn(SINT16_MIN, SINT16_MAX)
     }
 
     fun getInstantaneousPowerRaw(): Int {

@@ -12,6 +12,7 @@ import java.util.UUID
 class CyclingSpeedAndCadenceProfile(
     private val viewModel: ApplicationViewModel
 ) : SingleServiceGattProfile() {
+    override val bridgeOutputKey: String = "csc"
     private val measurementCharacteristic = CSCMeasurementCharacteristic(this, viewModel)
     private val featureCharacteristic = ReadOnlyValueCharacteristic(
         this,

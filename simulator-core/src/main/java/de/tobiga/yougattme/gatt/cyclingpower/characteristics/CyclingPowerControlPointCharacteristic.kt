@@ -13,6 +13,7 @@ import de.tobiga.yougattme.gatt.common.readUInt16
 import de.tobiga.yougattme.gatt.common.readUInt32
 import de.tobiga.yougattme.gatt.cyclingpower.CyclingPowerControlPointOpCodes
 import de.tobiga.yougattme.gatt.cyclingpower.CyclingPowerSimulatorConfiguration
+import de.tobiga.yougattme.bridge.RemoteControlDispatcher
 import java.util.UUID
 
 private data class CyclingPowerProcedureResult(
@@ -82,6 +83,35 @@ class CyclingPowerControlPointCharacteristic(
 
         sendWriteResponse(device, requestId, responseNeeded, BluetoothGatt.GATT_SUCCESS)
         procedureInProgressForAddress = device.address
+        // Measurement Content Masking is deliberately per downstream client and stays bridge-local.
+        if (requestCode != CyclingPowerControlPointOpCodes.MASK_MEASUREMENT_CONTENT &&
+            RemoteControlDispatcher.forwardIfConfigured(
+                outputKey = "cycling_power",
+                request = value,
+                calibration = requestCode == CyclingPowerControlPointOpCodes.START_OFFSET_COMPENSATION ||
+                    requestCode == CyclingPowerControlPointOpCodes.START_ENHANCED_OFFSET_COMPENSATION
+            ) { remote ->
+                if (procedureInProgressForAddress != device.address) return@forwardIfConfigured
+                val upstream = remote.response
+                val valid = remote.success && upstream != null && upstream.size >= 3 &&
+                    (upstream[0].toInt() and 0xFF) == CyclingPowerControlPointOpCodes.RESPONSE_CODE &&
+                    (upstream[1].toInt() and 0xFF) == requestCode
+                val upstreamSuccess = valid && (upstream!![2].toInt() and 0xFF) == RESULT_SUCCESS
+                val localSuccess = !upstreamSuccess || handleProcedure(device, requestCode, value).resultCode == RESULT_SUCCESS
+                val response = if (valid && localSuccess) upstream!! else byteArrayOf(
+                    CyclingPowerControlPointOpCodes.RESPONSE_CODE.toByte(), requestCode.toByte(),
+                    RESULT_OPERATION_FAILED.toByte()
+                )
+                recordEvent("TX", "${requestName(requestCode)} proxied response", response)
+                val server = gattProfile.bluetoothGattServer
+                if (server == null) {
+                    procedureInProgressForAddress = null
+                    return@forwardIfConfigured
+                }
+                GattNotificationDispatcher.enqueue(server, device, gattCharacteristic, true, response) {
+                    if (procedureInProgressForAddress == device.address) procedureInProgressForAddress = null
+                }
+            }) return
         val result = handleProcedure(device, requestCode, value)
         val response = byteArrayOf(
             CyclingPowerControlPointOpCodes.RESPONSE_CODE.toByte(),

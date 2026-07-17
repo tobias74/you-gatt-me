@@ -16,6 +16,7 @@ import de.tobiga.yougattme.gatt.fitnessmachine.FtmsSpinDownTarget
 import de.tobiga.yougattme.gatt.fitnessmachine.FtmsTargetState
 import de.tobiga.yougattme.gatt.fitnessmachine.IndoorCyclingSimulationParameters
 import de.tobiga.yougattme.tools.toHex
+import de.tobiga.yougattme.bridge.RemoteControlDispatcher
 import java.util.UUID
 
 object REQUEST_CODE {
@@ -154,6 +155,49 @@ class FitnessMachineControlPointCharacteristic(
         mainViewModel.ftmsControlProcedureState.postValue(
             "Awaiting confirmation · ${requestName(requestCode)}"
         )
+        if (requestCode == REQUEST_CODE.REQUEST_CONTROL) {
+            if (value.size != 1) {
+                sendControlPointResponse(device, requestCode, RESULT_CODE.INVALID_PARAMETER, ByteArray(0))
+                return
+            }
+            if (controlOwner != null && !isControlOwner(device)) {
+                sendControlPointResponse(device, requestCode, RESULT_CODE.CONTROL_NOT_PERMITTED, ByteArray(0))
+                return
+            }
+        } else {
+            if (!isSupportedControlProcedure(requestCode)) {
+                sendControlPointResponse(device, requestCode, RESULT_CODE.OP_CODE_NOT_SUPPORTED, ByteArray(0))
+                return
+            }
+            if (!isControlOwner(device)) {
+                sendControlPointResponse(device, requestCode, RESULT_CODE.CONTROL_NOT_PERMITTED, ByteArray(0))
+                return
+            }
+        }
+        if (RemoteControlDispatcher.forwardIfConfigured(
+                outputKey = "ftms",
+                request = value,
+                calibration = requestCode == REQUEST_CODE.SPIN_DOWN_CONTROL
+            ) { remote ->
+                if (!procedureInProgress || procedureDeviceAddress != device.address) return@forwardIfConfigured
+                val response = remote.response
+                val valid = remote.success && response != null && response.size >= 3 &&
+                    (response[0].toInt() and 0xFF) == RESPONSE_CODE &&
+                    (response[1].toInt() and 0xFF) == requestCode
+                var resultCode = if (valid) response!![2].toInt() and 0xFF else RESULT_CODE.OPERATION_FAILED
+                val parameters = if (valid) response!!.copyOfRange(3, response.size) else ByteArray(0)
+                if (requestCode == REQUEST_CODE.REQUEST_CONTROL && resultCode == RESULT_CODE.SUCCESS) {
+                    controlOwner = device
+                    mainViewModel.controlHasBeenTakenInControlPoint.postValue(true)
+                    mainViewModel.ftmsControlOwnerAddress.postValue(device.address)
+                } else if (resultCode == RESULT_CODE.SUCCESS) {
+                    val local = handleProcedure(device, requestCode, value)
+                    if (local.resultCode != RESULT_CODE.SUCCESS) resultCode = RESULT_CODE.OPERATION_FAILED
+                }
+                sendControlPointResponse(device, requestCode, resultCode, parameters)
+            }) {
+            return
+        }
         val result = handleProcedure(device, requestCode, value)
         sendControlPointResponse(device, requestCode, result.resultCode, result.responseParameters)
     }
@@ -577,8 +621,13 @@ class FitnessMachineControlPointCharacteristic(
             title = "${requestName(requestCode)} response: ${resultName(resultCode)} · ${device.address}",
             payload = response
         )
+        val server = gattProfile.bluetoothGattServer
+        if (server == null) {
+            finishProcedure(notificationsCanBeSent = false)
+            return
+        }
         GattNotificationDispatcher.enqueue(
-            server = gattProfile.bluetoothGattServer!!,
+            server = server,
             device = device,
             characteristic = gattCharacteristic,
             confirm = true,

@@ -50,7 +50,7 @@ class IndoorBikeDataCharacteristic(
             if (indoorBikeData.includeInstantaneousCadence) add(ftmsField(IndoorBikeDataFlags.INSTANTANEOUS_CADENCE_PRESENT) { u16(indoorBikeData.getInstantaneousCadenceHalfRpm()) })
             if (indoorBikeData.includeAverageCadence) add(ftmsField(IndoorBikeDataFlags.AVERAGE_CADENCE_PRESENT) { u16(indoorBikeData.getAverageCadenceHalfRpm()) })
             if (indoorBikeData.includeTotalDistance) add(ftmsField(IndoorBikeDataFlags.TOTAL_DISTANCE_PRESENT) { u24(indoorBikeData.getTotalDistanceInt()) })
-            if (indoorBikeData.includeResistanceLevel) add(ftmsField(IndoorBikeDataFlags.RESISTANCE_LEVEL_PRESENT) { u8(indoorBikeData.getResistanceLevelRaw()) })
+            if (indoorBikeData.includeResistanceLevel) add(ftmsField(IndoorBikeDataFlags.RESISTANCE_LEVEL_PRESENT) { s16(indoorBikeData.getResistanceLevelRaw()) })
             if (indoorBikeData.includeInstantaneousPower) add(ftmsField(IndoorBikeDataFlags.INSTANTANEOUS_POWER_PRESENT) { s16(indoorBikeData.getInstantaneousPowerRaw()) })
             if (indoorBikeData.includeAveragePower) add(ftmsField(IndoorBikeDataFlags.AVERAGE_POWER_PRESENT) { s16(indoorBikeData.getAveragePowerRaw()) })
             if (indoorBikeData.includeExpendedEnergy) add(ftmsField(IndoorBikeDataFlags.EXPENDED_ENERGY_PRESENT) {

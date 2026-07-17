@@ -12,6 +12,7 @@ import java.util.UUID
 class CyclingPowerProfile(
     private val viewModel: ApplicationViewModel
 ) : SingleServiceGattProfile(), CyclingPowerBroadcastSource {
+    override val bridgeOutputKey: String = "cycling_power"
     private var broadcastListener: ((Boolean, ByteArray) -> Unit)? = null
     private val broadcastEnabledAddresses = mutableSetOf<String>()
     private val measurementCharacteristic = CyclingPowerMeasurementCharacteristic(

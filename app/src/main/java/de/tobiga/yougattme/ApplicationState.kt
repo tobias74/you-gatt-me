@@ -30,10 +30,14 @@ import de.tobiga.yougattme.gatt.fitnessmachine.FitnessMachineProfile
 import de.tobiga.yougattme.gatt.common.GattNotificationDispatcher
 import de.tobiga.yougattme.gatt.rsc.RunningSpeedAndCadenceProfile
 import de.tobiga.yougattme.tools.toHex
+import de.tobiga.yougattme.bridge.RouteFreshness
+import de.tobiga.yougattme.bridge.RouteSource
 import java.util.*
 
 
 private const val TAG = "YouGattMeApplicationState"
+private const val BRIDGE_MIN_PUBLISH_INTERVAL_MILLIS = 250L
+private const val BRIDGE_HEARTBEAT_MILLIS = 1_000L
 
 data class GattRuntimeStatus(
     val label: String,
@@ -61,6 +65,7 @@ class ApplicationState private constructor(private val context: Context) {
     private var cyclingPowerBroadcastStartPending = false
     private var cyclingPowerBroadcastRequested = false
     private var pendingCyclingPowerBroadcastPayload = ByteArray(0)
+    private val lastBridgePublishByKey = mutableMapOf<String, Long>()
 
     lateinit var mainViewModel : ApplicationViewModel
 
@@ -68,7 +73,7 @@ class ApplicationState private constructor(private val context: Context) {
         private lateinit var instance: ApplicationState
         fun getInstance(context: Context): ApplicationState {
             if (!this::instance.isInitialized) {
-                instance = ApplicationState(context)
+                instance = ApplicationState(context.applicationContext)
             }
             return instance
         }
@@ -690,8 +695,15 @@ class ApplicationState private constructor(private val context: Context) {
                     }
 
                     eventCount += 1
-                    activeProfiles.forEach {
-                        it.triggerPeriodicTimer()
+                    activeProfiles.forEach { profile ->
+                        val key = profile.bridgeOutputKey
+                        if (key == null || !isBridgeRouted(key)) {
+                            profile.triggerPeriodicTimer()
+                        } else if (bridgeRouteIsFresh(key) &&
+                            now - (lastBridgePublishByKey[key] ?: 0L) >= BRIDGE_HEARTBEAT_MILLIS) {
+                            profile.triggerPeriodicTimer()
+                            lastBridgePublishByKey[key] = now
+                        }
                     }
                 }
             }
@@ -760,6 +772,25 @@ class ApplicationState private constructor(private val context: Context) {
             rebuildGatt = rebuildGatt
         )
     }
+
+    /** Publishes a changed bridged value immediately, coalesced to the protocol limit of 4 Hz. */
+    @Synchronized
+    fun publishBridgeOutput(outputKey: String) {
+        if (!isServerRunning || !bridgeRouteIsFresh(outputKey)) return
+        val now = SystemClock.elapsedRealtime()
+        if (now - (lastBridgePublishByKey[outputKey] ?: 0L) < BRIDGE_MIN_PUBLISH_INTERVAL_MILLIS) return
+        activeProfiles.filter { it.bridgeOutputKey == outputKey }.forEach { it.triggerPeriodicTimer() }
+        lastBridgePublishByKey[outputKey] = now
+    }
+
+    private fun isBridgeRouted(outputKey: String): Boolean {
+        val route = mainViewModel.bridgeState.routes.value.orEmpty()[outputKey] ?: return false
+        return route.defaultSource is RouteSource.Endpoint ||
+            route.fieldOverrides.values.any { it is RouteSource.Endpoint }
+    }
+
+    private fun bridgeRouteIsFresh(outputKey: String): Boolean =
+        mainViewModel.bridgeState.resolvedRoutes.value.orEmpty()[outputKey]?.freshness == RouteFreshness.FRESH
 
     private val cyclingPowerAdvertisingSetCallback = object : AdvertisingSetCallback() {
         override fun onAdvertisingSetStarted(

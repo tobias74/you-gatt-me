@@ -148,7 +148,7 @@ class CrossTrainerData {
     }
 
     fun getResistanceLevelRaw(): Int {
-        return (resistanceLevel * 10).ftmsUInt8()
+        return (resistanceLevel * 10).ftmsSInt16()
     }
 
     fun getInstantaneousPowerWatt(): Int {

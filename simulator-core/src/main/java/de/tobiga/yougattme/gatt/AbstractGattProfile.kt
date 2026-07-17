@@ -14,6 +14,8 @@ import java.util.*
  * @param serviceCreationStrategy The strategy object responsible for building the services.
  */
 abstract class AbstractGattProfile() {
+    /** Stable bridge route key, or null for profiles that do not consume routed measurements. */
+    open val bridgeOutputKey: String? = null
     var bluetoothGattServer: BluetoothGattServer? = null
     private val negotiatedMtuByAddress = mutableMapOf<String, Int>()
 

@@ -2,7 +2,6 @@ package de.tobiga.yougattme
 
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
-import androidx.lifecycle.ViewModel
 import de.tobiga.yougattme.gatt.fitnessmachine.CrossTrainerData
 import de.tobiga.yougattme.gatt.fitnessmachine.FtmsSupportedRanges
 import de.tobiga.yougattme.gatt.fitnessmachine.FtmsMeasurementSnapshot
@@ -21,6 +20,7 @@ import de.tobiga.yougattme.gatt.csc.CscSimulatorConfiguration
 import de.tobiga.yougattme.gatt.cyclingpower.CyclingPowerSimulatorConfiguration
 import de.tobiga.yougattme.gatt.rsc.RscSimulatorConfiguration
 import de.tobiga.yougattme.gatt.rsc.RunningSpeedAndCadenceProfileData
+import de.tobiga.yougattme.gatt.heartrate.HeartRateSimulatorConfiguration
 import de.tobiga.yougattme.tools.CrankRevolutionSimulator
 import de.tobiga.yougattme.tools.CyclingMeasurementSimulator
 import de.tobiga.yougattme.tools.WheelRevolutionSimulator
@@ -29,12 +29,26 @@ import java.util.ArrayDeque
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.PI
 
-class ApplicationViewModel : ViewModel() {
+/**
+ * Application-lifetime source of truth for all simulated protocol state.
+ *
+ * It deliberately has no Activity or Service dependency. [ApplicationViewModel] exposes this
+ * store to the legacy UI and profile APIs, while the BLE bridge can use it directly.
+ */
+class SimulationStateStore private constructor() {
+
+    companion object {
+        @JvmStatic
+        val shared: SimulationStateStore by lazy { SimulationStateStore() }
+    }
+
+    val bridgeState = de.tobiga.yougattme.bridge.BridgeStateStore.shared
 
     val runningSpeedAndCadenceData = RunningSpeedAndCadenceProfileData()
     val rscConfiguration = RscSimulatorConfiguration()
     val cscConfiguration = CscSimulatorConfiguration()
     val cyclingPowerConfiguration = CyclingPowerSimulatorConfiguration()
+    val heartRateConfiguration = HeartRateSimulatorConfiguration()
     val ftmsCrossTrainerData = CrossTrainerData()
     val ftmsTreadmillData = TreadmillData()
     val ftmsIndoorBikeData = IndoorBikeData()
@@ -46,7 +60,7 @@ class ApplicationViewModel : ViewModel() {
     val ftmsDeclaredTargetFeatures = FtmsTargetFeatures()
     var ftmsControlPointEnabled: Boolean = true
     var ftmsMirrorTargetFeatureDeclarations: Boolean = true
-    val ftmsSupportedRanges = FtmsSupportedRanges()
+    var ftmsSupportedRanges = FtmsSupportedRanges()
     private var ftmsTargetStateBacking = FtmsTargetState()
     val ftmsTargetState = MutableLiveData(ftmsTargetStateBacking)
     val ftmsTrainingStatus = MutableLiveData(0x01)

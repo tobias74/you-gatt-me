@@ -1,6 +1,7 @@
 package de.tobiga.yougattme.gatt.provider
 
 import de.tobiga.yougattme.ApplicationViewModel
+import de.tobiga.yougattme.SimulationStateStore
 import de.tobiga.yougattme.gatt.AbstractGattProfile
 
 enum class ProfileSelectionMode {
@@ -19,7 +20,8 @@ data class GattProfileDefinition(
 )
 
 data class ProfileDependencies(
-    val viewModel: ApplicationViewModel
+    val viewModel: ApplicationViewModel,
+    val stateStore: SimulationStateStore = viewModel.stateStore
 )
 
 interface GattProfileProvider {

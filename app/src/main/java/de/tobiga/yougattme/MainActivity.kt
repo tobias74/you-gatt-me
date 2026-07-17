@@ -3,6 +3,9 @@ package de.tobiga.yougattme
 import android.Manifest
 import android.bluetooth.BluetoothManager
 import android.content.Intent
+import android.content.ComponentName
+import android.content.Context
+import android.content.ServiceConnection
 import android.content.SharedPreferences
 import android.content.res.ColorStateList
 import android.content.pm.PackageManager
@@ -10,6 +13,7 @@ import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.IBinder
 import android.provider.Settings
 import android.text.TextUtils
 import android.view.View
@@ -31,6 +35,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.preference.PreferenceManager
 import com.google.android.material.switchmaterial.SwitchMaterial
+import com.google.android.material.button.MaterialButton
 import de.tobiga.yougattme.Constants.GATT_SERVER_ACTIVATED
 import de.tobiga.yougattme.databinding.ActivityMainBinding
 import de.tobiga.yougattme.gatt.AbstractGattProfile
@@ -53,11 +58,23 @@ import de.tobiga.yougattme.gatt.provider.ProfileSelectionMode
 import de.tobiga.yougattme.gatt.provider.StandardGattProfileProvider
 import de.tobiga.yougattme.gatt.rsc.RscFeatureBits
 import de.tobiga.yougattme.gatt.rsc.ScControlPointOpCodes
+import de.tobiga.yougattme.bridge.BleBridgeService
+import de.tobiga.yougattme.bridge.CapabilityMode
+import de.tobiga.yougattme.bridge.ControlRoute
+import de.tobiga.yougattme.bridge.InputConnectionStatus
+import de.tobiga.yougattme.bridge.Metric
+import de.tobiga.yougattme.bridge.RouteFreshness
+import de.tobiga.yougattme.bridge.RouteSource
+import de.tobiga.yougattme.bridge.ServiceRoute
+import de.tobiga.yougattme.bridge.SourceEndpoint
+import de.tobiga.yougattme.bridge.StandardBleUuids
+import de.tobiga.yougattme.bridge.StandardService
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import kotlin.math.roundToInt
 
 const val TERMS_AND_CONDITIONS_READ_VERSION = "TERMS_AND_CONDITIONS_READ_VERSION"
 const val CURRENT_VERSION_TERMS_AND_CONDITIONS = 4
@@ -116,9 +133,25 @@ class MainActivity : AppCompatActivity() {
     private lateinit var cameraExecutor: ExecutorService
     private lateinit var applicationState: ApplicationState
     private lateinit var serviceProfileAdapter: ServiceProfileAdapter
+    private var bridgeService: BleBridgeService? = null
+    private var bridgeBound = false
+    private val bridgeConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            bridgeService = (service as? BleBridgeService.LocalBinder)?.service
+            bridgeBound = bridgeService != null
+            synchronizePersistedCapabilityMirrors()
+            renderBridgeUi()
+        }
+        override fun onServiceDisconnected(name: ComponentName?) {
+            bridgeService = null
+            bridgeBound = false
+        }
+    }
     private val viewModel: ApplicationViewModel by viewModels()
     private val logLines = ArrayDeque<String>()
     private val renderedFieldToggles = mutableListOf<RenderedFieldToggle>()
+    private val bridgeRouteStatusViews = mutableMapOf<String, TextView>()
+    private val appliedCapabilityMirrors = mutableMapOf<String, String>()
     private var ftmsEnabled = true
     private var selectedFtmsProfileKey = "ftms_bike"
     private val selectedOptionalServiceKeys = linkedSetOf("csc", "cycling_power")
@@ -171,9 +204,12 @@ class MainActivity : AppCompatActivity() {
 
     private val requestPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { permissions ->
-            if (permissions.values.all { it }) {
+            if (BLUETOOTH_PERMISSIONS.all { permission -> permissions[permission] == true }) {
                 initializeApplicationState()
                 appendLog("Runtime permissions granted")
+                if (permissions[Manifest.permission.POST_NOTIFICATIONS] == false) {
+                    appendLog("Notification permission denied; bridge remains available")
+                }
             } else {
                 appendLog("Runtime permissions denied")
                 Toast.makeText(this, "Bluetooth permissions are required for GATT simulation.", Toast.LENGTH_SHORT).show()
@@ -192,9 +228,11 @@ class MainActivity : AppCompatActivity() {
         styleSimulatorSwitch(binding.switchHeartRate)
         styleSimulatorSwitch(binding.switchFtmsControlPoint)
         setupRuntimeActions()
+        setupBridgeActions()
         setupProfileActions()
         setupSimulationControls()
         setupSensorProtocolControls()
+        setupHeartRateControls()
         setupDeviceStateObservers()
         updateDeviceStatePanel()
         updateProfileButtons()
@@ -207,7 +245,7 @@ class MainActivity : AppCompatActivity() {
         if (allPermissionsGranted()) {
             initializeApplicationState()
         } else {
-            requestPermissionLauncher.launch(REQUIRED_PERMISSIONS)
+            requestPermissionLauncher.launch(REQUESTED_PERMISSIONS)
         }
     }
 
@@ -226,12 +264,18 @@ class MainActivity : AppCompatActivity() {
         }
         uiHandler.removeCallbacks(indoorBikeSummaryRefresh)
         cameraExecutor.shutdown()
+        if (bridgeBound) {
+            unbindService(bridgeConnection)
+            bridgeBound = false
+        }
     }
 
     private fun initializeApplicationState() {
         val wasInitialized = ::applicationState.isInitialized
         applicationState = ApplicationState.getInstance(this)
         applicationState.mainViewModel = viewModel
+        BleBridgeService.start(this)
+        bindBridgeService()
         applicationState.setRuntimeStatusListener { status ->
             runOnUiThread {
                 gattRuntimeStatus = status
@@ -271,13 +315,454 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun bindBridgeService() {
+        if (bridgeBound) return
+        bindService(Intent(this, BleBridgeService::class.java), bridgeConnection, Context.BIND_AUTO_CREATE)
+    }
+
+    private fun setupBridgeActions() {
+        binding.headerInputDevices.setOnClickListener {
+            val open = binding.contentInputDevices.visibility != View.VISIBLE
+            binding.contentInputDevices.visibility = if (open) View.VISIBLE else View.GONE
+            binding.iconInputDevicesExpand.setImageResource(
+                if (open) R.drawable.ic_accordion_expand_more else R.drawable.ic_accordion_chevron_right
+            )
+        }
+        binding.buttonScanInputs.setOnClickListener {
+            bridgeService?.startScan(binding.switchShowAllBleDevices.isChecked)
+                ?: Toast.makeText(this, "Bridge service is still starting", Toast.LENGTH_SHORT).show()
+        }
+        binding.buttonStopInputScan.setOnClickListener { bridgeService?.stopScan() }
+        binding.switchShowAllBleDevices.setOnCheckedChangeListener { _, enabled ->
+            viewModel.bridgeState.setShowAllDevices(enabled)
+        }
+
+        val bridgeState = viewModel.bridgeState
+        bridgeState.devices.observe(this) {
+            synchronizePersistedCapabilityMirrors()
+            renderBridgeUi()
+        }
+        bridgeState.routes.observe(this) {
+            synchronizePersistedCapabilityMirrors()
+            renderRouteControls()
+            updateSliderRoutingState()
+        }
+        bridgeState.controlRoutes.observe(this) { renderRouteControls() }
+        bridgeState.capabilityModes.observe(this) { renderRouteControls() }
+        bridgeState.resolvedRoutes.observe(this) {
+            updateBridgeRouteStatuses()
+            updateSliderRoutingState()
+            updateRoutedValueLabels()
+        }
+        bridgeState.scanning.observe(this) { scanning ->
+            binding.buttonScanInputs.isEnabled = !scanning
+            binding.buttonStopInputScan.isEnabled = scanning
+            renderBridgeSummary()
+        }
+        bridgeState.log.observe(this) { entries ->
+            binding.textBridgeLog.text = entries.take(30).joinToString("\n") { entry ->
+                val time = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(entry.timestampMillis))
+                "$time ${entry.category.padEnd(10)} ${entry.message}${entry.payloadHex?.let { " · $it" } ?: ""}"
+            }.ifEmpty { "No bridge traffic yet." }
+        }
+        renderBridgeUi()
+    }
+
+    private fun renderBridgeUi() {
+        renderBridgeSummary()
+        renderInputDevices()
+        renderRouteControls()
+        updateSliderRoutingState()
+    }
+
+    private fun renderBridgeSummary() {
+        if (!::binding.isInitialized) return
+        val devices = viewModel.bridgeState.devices.value.orEmpty().values
+        val ready = devices.count { it.status == InputConnectionStatus.READY }
+        val routed = viewModel.bridgeState.routes.value.orEmpty().values.count { route ->
+            route.defaultSource is RouteSource.Endpoint || route.fieldOverrides.values.any { it is RouteSource.Endpoint }
+        }
+        binding.textBridgeSummary.text = when {
+            viewModel.bridgeState.scanning.value == true -> "Scanning · $ready connected · $routed routed"
+            else -> "$ready connected input${if (ready == 1) "" else "s"} · $routed routed output${if (routed == 1) "" else "s"}"
+        }
+    }
+
+    private fun renderInputDevices() {
+        if (!::binding.isInitialized) return
+        val container = binding.layoutInputDeviceRows
+        container.removeAllViews()
+        val devices = viewModel.bridgeState.devices.value.orEmpty().values.sortedBy { it.identity.name ?: it.identity.address }
+        if (devices.isEmpty()) {
+            container.addView(bridgeText("No devices discovered yet. Start a scan above.", muted = true))
+            return
+        }
+        devices.forEach { device ->
+            val panel = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+                setBackgroundResource(R.drawable.simulator_toggle_group)
+            }
+            val title = device.identity.name?.takeIf(String::isNotBlank) ?: "Unnamed BLE device"
+            panel.addView(bridgeText(title, bold = true))
+            panel.addView(bridgeText(
+                "${device.identity.address} · ${device.rssi?.let { "$it dBm · " } ?: ""}${device.status.name.lowercase().replaceFirstChar(Char::uppercase)}",
+                muted = true
+            ))
+            device.detail?.let { panel.addView(bridgeText(it, muted = true)) }
+            if (device.endpoints.isNotEmpty()) {
+                panel.addView(bridgeText(device.endpoints.joinToString("\n") { "• ${it.serviceName} · ${it.supportedMetrics.joinToString { metric -> metric.displayName }}" }, muted = true))
+            } else if (device.advertisedServices.isNotEmpty()) {
+                panel.addView(bridgeText("Advertises ${device.advertisedServices.joinToString { it.shortName }}", muted = true))
+            }
+            val button = MaterialButton(this).apply {
+                isAllCaps = false
+                text = if (device.status in setOf(InputConnectionStatus.CONNECTING, InputConnectionStatus.INITIALIZING,
+                        InputConnectionStatus.READY, InputConnectionStatus.RECONNECTING)) "Disconnect" else "Connect"
+                setOnClickListener {
+                    if (device.status in setOf(InputConnectionStatus.CONNECTING, InputConnectionStatus.INITIALIZING,
+                            InputConnectionStatus.READY, InputConnectionStatus.RECONNECTING)) {
+                        bridgeService?.disconnect(device.identity.address)
+                    } else bridgeService?.connect(device.identity.address)
+                }
+            }
+            panel.addView(button)
+            container.addView(panel, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(8) })
+        }
+    }
+
+    private fun renderRouteControls() {
+        if (!::binding.isInitialized) return
+        val container = binding.layoutBridgeRoutes
+        container.removeAllViews()
+        bridgeRouteStatusViews.clear()
+        routeDefinitions().forEach { (key, title, service) ->
+            val route = viewModel.bridgeState.routes.value.orEmpty()[key] ?: ServiceRoute(key, service)
+            container.addView(createRoutePanel(key, title, route), LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(10) })
+        }
+    }
+
+    private fun createRoutePanel(outputKey: String, title: String, route: ServiceRoute): View {
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            setBackgroundResource(R.drawable.simulator_toggle_group)
+        }
+        panel.addView(bridgeText(title, bold = true))
+        val resolved = viewModel.bridgeState.resolvedRoutes.value.orEmpty()[outputKey]
+        val status = when (resolved?.freshness) {
+            RouteFreshness.FRESH -> "Fresh"
+            RouteFreshness.STALE -> "Stale · ${resolved.staleMetrics.joinToString { it.displayName }}"
+            RouteFreshness.INCOMPLETE -> "Incomplete · missing ${resolved.missingMetrics.joinToString { it.displayName }}"
+            null -> "Manual"
+        }
+        val statusView = bridgeText(status, muted = resolved?.freshness != RouteFreshness.FRESH)
+        bridgeRouteStatusViews[outputKey] = statusView
+        panel.addView(statusView)
+
+        panel.addView(bridgeText("Measurement source", muted = true))
+        val endpoints = readyEndpoints().filter { endpoint ->
+            endpoint.supportedMetrics.any { it in routeMetrics(outputKey) }
+        }
+        val sourceChoices = listOf("Manual sliders" to RouteSource.Manual) +
+            endpoints.map { it.label to RouteSource.Endpoint(it.id) }
+        panel.addView(sourceSpinner(sourceChoices, route.defaultSource) { source ->
+            restoreManualBridgeValues()
+            if (viewModel.bridgeState.capabilityModes.value.orEmpty()[outputKey] == CapabilityMode.MIRROR_CONNECTED_SERVICE) {
+                val selectedEndpoint = (source as? RouteSource.Endpoint)?.let { selected ->
+                    readyEndpoints().firstOrNull { it.id == selected.endpointId }
+                }
+                if (selectedEndpoint?.service != route.outputService) {
+                    bridgeService?.setCapabilityMode(outputKey, CapabilityMode.SIMULATOR_CONFIGURATION)
+                        ?: viewModel.bridgeState.setCapabilityMode(outputKey, CapabilityMode.SIMULATOR_CONFIGURATION)
+                    appliedCapabilityMirrors.remove(outputKey)
+                }
+            }
+            bridgeService?.setRoute(route.copy(defaultSource = source))
+                ?: viewModel.bridgeState.setRoute(route.copy(defaultSource = source))
+        })
+
+        val overridesButton = MaterialButton(this).apply {
+            text = "Field routing overrides"
+            isAllCaps = false
+        }
+        val overrides = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        overridesButton.setOnClickListener {
+            overrides.visibility = if (overrides.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        }
+        panel.addView(overridesButton)
+        routeMetrics(outputKey).forEach { metric ->
+            overrides.addView(bridgeText(metric.displayName, muted = true))
+            val choices = listOf("Inherit service source" to RouteSource.Inherit, "Manual slider/value" to RouteSource.Manual) +
+                readyEndpoints().filter { metric in it.supportedMetrics }.map { it.label to RouteSource.Endpoint(it.id) }
+            overrides.addView(sourceSpinner(choices, route.fieldOverrides[metric] ?: RouteSource.Inherit) { source ->
+                restoreManualBridgeValues()
+                val fields = route.fieldOverrides.toMutableMap()
+                if (source == RouteSource.Inherit) fields.remove(metric) else fields[metric] = source
+                bridgeService?.setRoute(route.copy(fieldOverrides = fields))
+                    ?: viewModel.bridgeState.setRoute(route.copy(fieldOverrides = fields))
+            })
+        }
+        panel.addView(overrides)
+
+        panel.addView(bridgeText("Control Point destination", muted = true))
+        val remoteControls = readyEndpoints().filter { it.service == route.outputService && it.controlPointCharacteristic != null }
+        val controlChoices = listOf("Local simulator" to ControlRoute.LocalSimulator) +
+            remoteControls.map { it.label to ControlRoute.Remote(it.id) }
+        val activeControl = viewModel.bridgeState.controlRoutes.value.orEmpty()[outputKey] ?: ControlRoute.LocalSimulator
+        panel.addView(controlSpinner(outputKey, controlChoices, activeControl))
+
+        panel.addView(bridgeText("Capability mode", muted = true))
+        val modes = listOf("Simulator configuration", "Mirror same-protocol source")
+        val capabilitySpinner = Spinner(this)
+        capabilitySpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, modes)
+        val activeMode = viewModel.bridgeState.capabilityModes.value.orEmpty()[outputKey] ?: CapabilityMode.SIMULATOR_CONFIGURATION
+        capabilitySpinner.setSelection(if (activeMode == CapabilityMode.MIRROR_CONNECTED_SERVICE) 1 else 0, false)
+        capabilitySpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            private var initial = true
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (initial) { initial = false; return }
+                val mode = if (position == 1) CapabilityMode.MIRROR_CONNECTED_SERVICE else CapabilityMode.SIMULATOR_CONFIGURATION
+                var mirroredEndpoint: SourceEndpoint? = null
+                if (mode == CapabilityMode.MIRROR_CONNECTED_SERVICE) {
+                    mirroredEndpoint = (route.defaultSource as? RouteSource.Endpoint)?.let { source ->
+                        readyEndpoints().firstOrNull { it.id == source.endpointId }
+                    }
+                    if (mirroredEndpoint?.service != route.outputService) {
+                        Toast.makeText(this@MainActivity, "Capability mirroring requires a same-protocol measurement source.", Toast.LENGTH_LONG).show()
+                        capabilitySpinner.setSelection(0, false)
+                        return
+                    }
+                    if (route.outputService == StandardService.FTMS) {
+                        selectMirroredFtmsMachine(mirroredEndpoint)
+                    }
+                }
+                val applied = bridgeService?.setCapabilityMode(outputKey, mode) ?: run {
+                    viewModel.bridgeState.setCapabilityMode(outputKey, mode)
+                    true
+                }
+                if (!applied) {
+                    Toast.makeText(this@MainActivity, "The connected service did not expose readable capabilities.", Toast.LENGTH_LONG).show()
+                    capabilitySpinner.setSelection(0, false)
+                    return
+                }
+                if (mode == CapabilityMode.MIRROR_CONNECTED_SERVICE && mirroredEndpoint != null) {
+                    appliedCapabilityMirrors[outputKey] = mirroredEndpoint.id
+                } else {
+                    appliedCapabilityMirrors.remove(outputKey)
+                }
+                if (::applicationState.isInitialized) applySelectedServiceStack(rebuildGatt = true, logChange = true)
+            }
+        }
+        panel.addView(capabilitySpinner)
+        return panel
+    }
+
+    private fun synchronizePersistedCapabilityMirrors() {
+        val service = bridgeService ?: return
+        val ready = readyEndpoints().associateBy(SourceEndpoint::id)
+        appliedCapabilityMirrors.entries.removeAll { (_, endpointId) -> endpointId !in ready }
+        var rebuildGatt = false
+        viewModel.bridgeState.capabilityModes.value.orEmpty().forEach { (outputKey, mode) ->
+            if (mode != CapabilityMode.MIRROR_CONNECTED_SERVICE) return@forEach
+            val route = viewModel.bridgeState.routes.value.orEmpty()[outputKey] ?: return@forEach
+            val endpointId = (route.defaultSource as? RouteSource.Endpoint)?.endpointId ?: return@forEach
+            val endpoint = ready[endpointId] ?: return@forEach
+            if (endpoint.service != route.outputService || appliedCapabilityMirrors[outputKey] == endpointId) return@forEach
+            if (route.outputService == StandardService.FTMS) selectMirroredFtmsMachine(endpoint)
+            if (service.setCapabilityMode(outputKey, mode)) {
+                appliedCapabilityMirrors[outputKey] = endpointId
+                rebuildGatt = true
+            }
+        }
+        if (rebuildGatt && ::applicationState.isInitialized) {
+            applySelectedServiceStack(rebuildGatt = true, logChange = true)
+        }
+    }
+
+    private fun selectMirroredFtmsMachine(endpoint: SourceEndpoint?) {
+        val profileKey = when (endpoint?.measurementCharacteristic) {
+            StandardBleUuids.FTMS_INDOOR_BIKE_DATA -> "ftms_bike"
+            StandardBleUuids.FTMS_TREADMILL_DATA -> "ftms_treadmill"
+            StandardBleUuids.FTMS_CROSS_TRAINER_DATA -> "ftms_cross"
+            StandardBleUuids.FTMS_STEP_CLIMBER_DATA -> "ftms_step"
+            StandardBleUuids.FTMS_STAIR_CLIMBER_DATA -> "ftms_stair"
+            StandardBleUuids.FTMS_ROWER_DATA -> "ftms_rower"
+            else -> return
+        }
+        if (selectedFtmsProfileKey == profileKey) return
+        selectedFtmsProfileKey = profileKey
+        renderedMachineFieldKey = null
+        binding.spinnerFtmsMachine.setSelection(
+            ftmsMachineOptions.indexOfFirst { it.profileKey == profileKey }.coerceAtLeast(0),
+            false
+        )
+    }
+
+    private fun updateBridgeRouteStatuses() {
+        bridgeRouteStatusViews.forEach { (key, view) ->
+            val resolved = viewModel.bridgeState.resolvedRoutes.value.orEmpty()[key]
+            view.text = when (resolved?.freshness) {
+                RouteFreshness.FRESH -> "Fresh"
+                RouteFreshness.STALE -> "Stale · ${resolved.staleMetrics.joinToString { it.displayName }}"
+                RouteFreshness.INCOMPLETE -> "Incomplete · missing ${resolved.missingMetrics.joinToString { it.displayName }}"
+                null -> "Manual"
+            }
+            view.setTextColor(ContextCompat.getColor(this,
+                if (resolved?.freshness == RouteFreshness.FRESH) R.color.simulator_ink else R.color.simulator_ink_muted))
+        }
+    }
+
+    private fun sourceSpinner(
+        choices: List<Pair<String, RouteSource>>,
+        selected: RouteSource,
+        changed: (RouteSource) -> Unit
+    ): Spinner = Spinner(this).apply {
+        adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, choices.map { it.first })
+        val selectedIndex = choices.indexOfFirst { it.second == selected }.coerceAtLeast(0)
+        setSelection(selectedIndex, false)
+        onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            private var initial = true
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (initial) { initial = false; return }
+                choices.getOrNull(position)?.second?.let(changed)
+            }
+        }
+    }
+
+    private fun controlSpinner(
+        outputKey: String,
+        choices: List<Pair<String, ControlRoute>>,
+        selected: ControlRoute
+    ): Spinner = Spinner(this).apply {
+        adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, choices.map { it.first })
+        setSelection(choices.indexOfFirst { it.second == selected }.coerceAtLeast(0), false)
+        onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            private var initial = true
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (initial) { initial = false; return }
+                val route = choices.getOrNull(position)?.second ?: return
+                if (route is ControlRoute.Remote) {
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle("Enable physical trainer control?")
+                        .setMessage("Downstream Control Point commands may change resistance, inclination or power on the connected device. Measurement routing alone never enables this.")
+                        .setNegativeButton("Cancel") { _, _ ->
+                            setSelection(choices.indexOfFirst { it.second == selected }.coerceAtLeast(0), false)
+                        }
+                        .setPositiveButton("Enable control") { _, _ -> bridgeService?.setControlRoute(outputKey, route) }
+                        .show()
+                } else bridgeService?.setControlRoute(outputKey, route)
+            }
+        }
+    }
+
+    private fun readyEndpoints(): List<SourceEndpoint> = viewModel.bridgeState.devices.value.orEmpty().values
+        .filter { it.status == InputConnectionStatus.READY }
+        .flatMap { it.endpoints }
+
+    private fun routeDefinitions() = listOf(
+        Triple("ftms", "FTMS output", StandardService.FTMS),
+        Triple("cycling_power", "Cycling Power output", StandardService.CYCLING_POWER),
+        Triple("csc", "CSC output", StandardService.CSC),
+        Triple("rsc", "RSC output", StandardService.RSC),
+        Triple("heart_rate", "Heart Rate output", StandardService.HEART_RATE)
+    )
+
+    private fun routeMetrics(outputKey: String): List<Metric> = when (outputKey) {
+        "ftms" -> listOf(Metric.SPEED_MPS, Metric.CADENCE_RPM, Metric.POWER_WATTS,
+            Metric.HEART_RATE_BPM, Metric.RESISTANCE_LEVEL, Metric.INCLINATION_PERCENT,
+            Metric.STEP_RATE_PER_MINUTE, Metric.STROKE_RATE_PER_MINUTE,
+            Metric.METABOLIC_EQUIVALENT, Metric.MOVEMENT_DIRECTION)
+        "cycling_power" -> listOf(Metric.POWER_WATTS, Metric.SPEED_MPS, Metric.CADENCE_RPM,
+            Metric.PEDAL_POWER_BALANCE_PERCENT, Metric.ACCUMULATED_TORQUE_NM)
+        "csc" -> listOf(Metric.SPEED_MPS, Metric.CADENCE_RPM)
+        "rsc" -> listOf(Metric.SPEED_MPS, Metric.CADENCE_RPM, Metric.STRIDE_LENGTH_METERS,
+            Metric.WALKING_RUNNING_STATUS)
+        "heart_rate" -> listOf(Metric.HEART_RATE_BPM, Metric.HEART_RATE_ENERGY_KJ, Metric.RR_INTERVAL_SECONDS)
+        else -> emptyList()
+    }
+
+    private fun isDeviceRouted(outputKey: String, metric: Metric): Boolean {
+        val route = viewModel.bridgeState.routes.value.orEmpty()[outputKey] ?: return false
+        val field = route.fieldOverrides[metric] ?: RouteSource.Inherit
+        val source = if (field == RouteSource.Inherit) route.defaultSource else field
+        return source is RouteSource.Endpoint
+    }
+
+    private fun restoreManualBridgeValues() {
+        updateSimulationValuesFromControls()
+        viewModel.heartRateConfiguration.apply {
+            heartRateBpm = binding.sliderHeartRateService.value.roundToInt()
+            energyExpendedKj = binding.sliderHeartRateEnergy.value.roundToInt()
+            rrIntervalsSeconds = listOf(binding.sliderHeartRateRr.value.toDouble())
+        }
+    }
+
+    private fun updateSliderRoutingState() {
+        if (!::binding.isInitialized) return
+        binding.sliderSpeed.isEnabled = !isDeviceRouted("ftms", Metric.SPEED_MPS)
+        binding.sliderCadence.isEnabled = !isDeviceRouted("ftms", Metric.CADENCE_RPM)
+        binding.sliderPower.isEnabled = !isDeviceRouted("ftms", Metric.POWER_WATTS)
+        binding.sliderHeartRate.isEnabled = !isDeviceRouted("ftms", Metric.HEART_RATE_BPM)
+        binding.sliderResistance.isEnabled = !isDeviceRouted("ftms", Metric.RESISTANCE_LEVEL)
+        binding.sliderInclination.isEnabled = !isDeviceRouted("ftms", Metric.INCLINATION_PERCENT)
+        binding.sliderCscSpeed.isEnabled = !isDeviceRouted("csc", Metric.SPEED_MPS)
+        binding.sliderCscCadence.isEnabled = !isDeviceRouted("csc", Metric.CADENCE_RPM)
+        binding.sliderCyclingPower.isEnabled = !isDeviceRouted("cycling_power", Metric.POWER_WATTS)
+        binding.sliderCyclingPowerSpeed.isEnabled = !isDeviceRouted("cycling_power", Metric.SPEED_MPS)
+        binding.sliderCyclingPowerCadence.isEnabled = !isDeviceRouted("cycling_power", Metric.CADENCE_RPM)
+        binding.sliderRscSpeed.isEnabled = !isDeviceRouted("rsc", Metric.SPEED_MPS)
+        binding.sliderRscCadence.isEnabled = !isDeviceRouted("rsc", Metric.CADENCE_RPM)
+        binding.sliderHeartRateService.isEnabled = !isDeviceRouted("heart_rate", Metric.HEART_RATE_BPM)
+        binding.sliderHeartRateEnergy.isEnabled = !isDeviceRouted("heart_rate", Metric.HEART_RATE_ENERGY_KJ)
+        binding.sliderHeartRateRr.isEnabled = !isDeviceRouted("heart_rate", Metric.RR_INTERVAL_SECONDS)
+    }
+
+    private fun updateRoutedValueLabels() {
+        fun value(key: String, metric: Metric): Pair<Double, String>? {
+            val sample = viewModel.bridgeState.resolvedRoutes.value.orEmpty()[key]?.values?.get(metric) ?: return null
+            val source = viewModel.bridgeState.endpoint(sample.endpointId)?.label ?: sample.endpointId
+            return sample.value to source
+        }
+        value("ftms", Metric.SPEED_MPS)?.let { (v, source) -> binding.labelSpeedValue.text = "Speed ${formatOne((v * 3.6).toFloat())} km/h · $source" }
+        value("ftms", Metric.CADENCE_RPM)?.let { (v, source) -> binding.labelCadenceValue.text = "Cadence ${v.roundToInt()} rpm · $source" }
+        value("ftms", Metric.POWER_WATTS)?.let { (v, source) -> binding.labelPowerValue.text = "Power ${v.roundToInt()} W · $source" }
+        value("ftms", Metric.HEART_RATE_BPM)?.let { (v, source) -> binding.labelHeartRateValue.text = "Heart rate ${v.roundToInt()} bpm · $source" }
+        value("csc", Metric.SPEED_MPS)?.let { (v, source) -> binding.labelCscSpeedValue.text = "CSC speed ${formatOne((v * 3.6).toFloat())} km/h · $source" }
+        value("csc", Metric.CADENCE_RPM)?.let { (v, source) -> binding.labelCscCadenceValue.text = "CSC cadence ${v.roundToInt()} rpm · $source" }
+        value("cycling_power", Metric.POWER_WATTS)?.let { (v, source) -> binding.labelCyclingPowerValue.text = "Power ${v.roundToInt()} W · $source" }
+        value("rsc", Metric.SPEED_MPS)?.let { (v, source) -> binding.labelRscSpeedValue.text = "RSC speed ${String.format(Locale.US, "%.1f", v)} m/s · $source" }
+        value("heart_rate", Metric.HEART_RATE_BPM)?.let { (v, source) -> binding.labelHeartRateServiceValue.text = "Heart rate ${v.roundToInt()} bpm · $source" }
+        value("heart_rate", Metric.HEART_RATE_ENERGY_KJ)?.let { (v, source) -> binding.labelHeartRateEnergyValue.text = "Energy expended ${v.roundToInt()} kJ · $source" }
+        value("heart_rate", Metric.RR_INTERVAL_SECONDS)?.let { (v, source) -> binding.labelHeartRateRrValue.text = "RR interval ${String.format(Locale.US, "%.2f", v)} s · $source" }
+    }
+
+    private fun bridgeText(text: String, muted: Boolean = false, bold: Boolean = false) = TextView(this).apply {
+        this.text = text
+        textSize = if (bold) 15f else 12f
+        setTextColor(ContextCompat.getColor(this@MainActivity,
+            if (muted) R.color.simulator_ink_muted else R.color.simulator_ink))
+        if (bold) setTypeface(typeface, Typeface.BOLD)
+        setPadding(0, dp(3), 0, dp(3))
+    }
+
     private fun setupProfileActions() {
         setupServiceProfileList()
         setupFtmsMachineDropdown()
     }
 
     private fun setupServiceProfileList() {
-        val standardServiceKeys = setOf("csc", "cycling_power", "rsc")
+        val standardServiceKeys = setOf("csc", "cycling_power", "rsc", "heart_rate")
         val ftmsMachineKeys = ftmsMachineOptions.map { option -> option.profileKey }.toSet()
         val extensionProfiles = profiles.values
             .filter { profile -> profile.key !in standardServiceKeys }
@@ -337,6 +822,15 @@ class MainActivity : AppCompatActivity() {
                 isEnabled = { selectedOptionalServiceKeys.contains("rsc") },
                 summary = { rscSummary() },
                 setEnabled = { enabled -> setOptionalServiceEnabled("rsc", enabled) }
+            ),
+            ServiceProfileRow(
+                key = "heart_rate",
+                title = "Heart Rate",
+                subtitle = profiles["heart_rate"]?.subtitle ?: "Heart Rate Service simulation.",
+                contentView = prepareServiceContent(binding.layoutHeartRateLiveData),
+                isEnabled = { selectedOptionalServiceKeys.contains("heart_rate") },
+                summary = { heartRateSummary() },
+                setEnabled = { enabled -> setOptionalServiceEnabled("heart_rate", enabled) }
             )
         ) + extensionRows
 
@@ -500,6 +994,55 @@ class MainActivity : AppCompatActivity() {
         renderRscProtocolControls()
         renderCscProtocolControls()
         renderCyclingPowerProtocolControls()
+    }
+
+    private fun setupHeartRateControls() {
+        val configuration = viewModel.heartRateConfiguration
+        binding.sliderHeartRateService.value = configuration.heartRateBpm.toFloat()
+        binding.sliderHeartRateEnergy.value = configuration.energyExpendedKj.toFloat()
+        binding.sliderHeartRateRr.value = configuration.rrIntervalsSeconds.lastOrNull()?.toFloat() ?: 0.8f
+        binding.switchHeartRateEnergy.isChecked = configuration.includeEnergyExpended
+        binding.switchHeartRateRr.isChecked = configuration.includeRrIntervals
+        binding.switchHeartRateContact.isChecked = configuration.sensorContactSupported && configuration.sensorContactDetected
+        binding.switchHeartRateBodyLocation.isChecked = configuration.bodySensorLocationCharacteristicEnabled
+        binding.switchHeartRateControlPoint.isChecked = configuration.controlPointCharacteristicEnabled
+        listOf(binding.switchHeartRateEnergy, binding.switchHeartRateRr, binding.switchHeartRateContact,
+            binding.switchHeartRateBodyLocation, binding.switchHeartRateControlPoint).forEach(::styleSimulatorSwitch)
+
+        fun refresh(rebuildGatt: Boolean = false) {
+            binding.labelHeartRateServiceValue.text = "Heart rate ${configuration.heartRateBpm} bpm"
+            binding.labelHeartRateEnergyValue.text = "Energy expended ${configuration.energyExpendedKj} kJ"
+            binding.labelHeartRateRrValue.text = "RR interval ${String.format(Locale.US, "%.2f", configuration.rrIntervalsSeconds.lastOrNull() ?: 0.0)} s"
+            updateProfileRowSummaries()
+            if (rebuildGatt && ::applicationState.isInitialized && "heart_rate" in selectedOptionalServiceKeys) {
+                applySelectedServiceStack(rebuildGatt = true, logChange = true)
+            }
+        }
+        binding.sliderHeartRateService.addOnChangeListener { _, value, fromUser ->
+            if (fromUser) { configuration.heartRateBpm = value.roundToInt(); refresh() }
+        }
+        binding.sliderHeartRateEnergy.addOnChangeListener { _, value, fromUser ->
+            if (fromUser) { configuration.energyExpendedKj = value.roundToInt(); refresh() }
+        }
+        binding.sliderHeartRateRr.addOnChangeListener { _, value, fromUser ->
+            if (fromUser) { configuration.rrIntervalsSeconds = listOf(value.toDouble()); refresh() }
+        }
+        binding.switchHeartRateEnergy.setOnCheckedChangeListener { _, checked ->
+            configuration.includeEnergyExpended = checked; refresh(rebuildGatt = true)
+        }
+        binding.switchHeartRateRr.setOnCheckedChangeListener { _, checked ->
+            configuration.includeRrIntervals = checked; refresh()
+        }
+        binding.switchHeartRateContact.setOnCheckedChangeListener { _, checked ->
+            configuration.sensorContactSupported = checked; configuration.sensorContactDetected = checked; refresh()
+        }
+        binding.switchHeartRateBodyLocation.setOnCheckedChangeListener { _, checked ->
+            configuration.bodySensorLocationCharacteristicEnabled = checked; refresh(rebuildGatt = true)
+        }
+        binding.switchHeartRateControlPoint.setOnCheckedChangeListener { _, checked ->
+            configuration.controlPointCharacteristicEnabled = checked; refresh(rebuildGatt = true)
+        }
+        refresh()
     }
 
     private fun renderRscProtocolControls() {
@@ -1686,6 +2229,13 @@ class MainActivity : AppCompatActivity() {
             "${binding.sliderRscCadence.value.toInt()} spm | declared 0x${configuration.featureBitsForGatt().toString(16).uppercase()} / actual 0x${configuration.actualFeatureBits().toString(16).uppercase()}"
     }
 
+    private fun heartRateSummary(): String {
+        val configuration = viewModel.heartRateConfiguration
+        return "${serviceStateLabel("heart_rate")} | ${configuration.heartRateBpm} bpm | " +
+            "${if (configuration.includeEnergyExpended) "energy" else "no energy"} | " +
+            "${if (configuration.includeRrIntervals) "RR" else "no RR"}"
+    }
+
     private fun selectedFtmsMachineLabel(): String {
         return ftmsMachineOptions.firstOrNull { option -> option.profileKey == selectedFtmsProfileKey }?.label
             ?: selectedFtmsProfileKey
@@ -2474,7 +3024,7 @@ class MainActivity : AppCompatActivity() {
         binding.textEventLog.text = logLines.joinToString(separator = "\n")
     }
 
-    private fun allPermissionsGranted() = REQUIRED_PERMISSIONS.all {
+    private fun allPermissionsGranted() = BLUETOOTH_PERMISSIONS.all {
         ContextCompat.checkSelfPermission(baseContext, it) == PackageManager.PERMISSION_GRANTED
     }
 
@@ -2533,10 +3083,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
-        private val REQUIRED_PERMISSIONS = mutableListOf(
+        private val BLUETOOTH_PERMISSIONS = arrayOf(
             Manifest.permission.BLUETOOTH_ADVERTISE,
             Manifest.permission.BLUETOOTH_CONNECT,
             Manifest.permission.BLUETOOTH_SCAN
-        ).toTypedArray()
+        )
+        private val REQUESTED_PERMISSIONS = BLUETOOTH_PERMISSIONS + Manifest.permission.POST_NOTIFICATIONS
     }
 }

@@ -6,6 +6,7 @@ import android.bluetooth.BluetoothGattCharacteristic
 import de.tobiga.yougattme.gatt.AbstractGattProfile
 import de.tobiga.yougattme.gatt.BaseGattCharacteristic
 import de.tobiga.yougattme.gatt.rsc.ScControlPointOpCodes
+import de.tobiga.yougattme.bridge.RemoteControlDispatcher
 import java.util.UUID
 
 enum class ScControlPointDialect {
@@ -84,6 +85,30 @@ class ScControlPointCharacteristic(
         sendWriteResponse(device, requestId, responseNeeded, BluetoothGatt.GATT_SUCCESS)
         procedureInProgressForAddress = device.address
         val requestCode = value[0].toInt() and 0xFF
+        val outputKey = if (dialect == ScControlPointDialect.CSC) "csc" else "rsc"
+        if (RemoteControlDispatcher.forwardIfConfigured(
+                outputKey, value, calibration = dialect == ScControlPointDialect.RSC && requestCode == 0x02
+            ) { remote ->
+                if (procedureInProgressForAddress != device.address) return@forwardIfConfigured
+                val upstream = remote.response
+                val valid = remote.success && upstream != null && upstream.size >= 3 &&
+                    (upstream[0].toInt() and 0xFF) == ScControlPointOpCodes.RESPONSE_CODE &&
+                    (upstream[1].toInt() and 0xFF) == requestCode
+                val upstreamSuccess = valid && (upstream!![2].toInt() and 0xFF) == RESULT_SUCCESS
+                val localSuccess = !upstreamSuccess || handleProcedure(requestCode, value).resultCode == RESULT_SUCCESS
+                val response = if (valid && localSuccess) upstream!! else byteArrayOf(
+                    ScControlPointOpCodes.RESPONSE_CODE.toByte(), requestCode.toByte(), RESULT_OPERATION_FAILED.toByte()
+                )
+                recordEvent("TX", "${requestName(requestCode)} proxied response", response)
+                val server = gattProfile.bluetoothGattServer
+                if (server == null) {
+                    procedureInProgressForAddress = null
+                    return@forwardIfConfigured
+                }
+                GattNotificationDispatcher.enqueue(server, device, gattCharacteristic, true, response) {
+                    if (procedureInProgressForAddress == device.address) procedureInProgressForAddress = null
+                }
+            }) return
         val result = handleProcedure(requestCode, value)
         val response = byteArrayOf(
             ScControlPointOpCodes.RESPONSE_CODE.toByte(),

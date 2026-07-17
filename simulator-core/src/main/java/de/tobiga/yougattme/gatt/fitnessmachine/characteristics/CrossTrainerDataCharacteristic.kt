@@ -61,7 +61,7 @@ class CrossTrainerDataCharacteristic(
                 s16(crossTrainerData.getInclinationTenthsPercent())
                 s16(crossTrainerData.getRampAngleTenthsDegree())
             })
-            if (crossTrainerData.includeResistanceLevel) add(ftmsField(CrossTrainerDataFlags.RESISTANCE_LEVEL_PRESENT) { u8(crossTrainerData.getResistanceLevelRaw()) })
+            if (crossTrainerData.includeResistanceLevel) add(ftmsField(CrossTrainerDataFlags.RESISTANCE_LEVEL_PRESENT) { s16(crossTrainerData.getResistanceLevelRaw()) })
             if (crossTrainerData.includeInstantaneousPower) add(ftmsField(CrossTrainerDataFlags.INSTANTANEOUS_POWER_PRESENT) { s16(crossTrainerData.getInstantaneousPowerWatt()) })
             if (crossTrainerData.includeAveragePower) add(ftmsField(CrossTrainerDataFlags.AVERAGE_POWER_PRESENT) { s16(crossTrainerData.getAveragePowerWatt()) })
             if (crossTrainerData.includeExpendedEnergy) add(ftmsField(CrossTrainerDataFlags.EXPENDED_ENERGY_PRESENT) {

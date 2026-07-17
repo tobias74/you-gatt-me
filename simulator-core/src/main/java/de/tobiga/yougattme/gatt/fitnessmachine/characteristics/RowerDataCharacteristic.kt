@@ -49,7 +49,7 @@ class RowerDataCharacteristic(
             if (rowerData.includeAveragePace) add(ftmsField(RowerDataFlags.AVERAGE_PACE_PRESENT) { u16(rowerData.getAveragePaceSeconds()) })
             if (rowerData.includeInstantaneousPower) add(ftmsField(RowerDataFlags.INSTANTANEOUS_POWER_PRESENT) { s16(rowerData.getInstantaneousPowerWatt()) })
             if (rowerData.includeAveragePower) add(ftmsField(RowerDataFlags.AVERAGE_POWER_PRESENT) { s16(rowerData.getAveragePowerWatt()) })
-            if (rowerData.includeResistanceLevel) add(ftmsField(RowerDataFlags.RESISTANCE_LEVEL_PRESENT) { u8(rowerData.getResistanceLevelRaw()) })
+            if (rowerData.includeResistanceLevel) add(ftmsField(RowerDataFlags.RESISTANCE_LEVEL_PRESENT) { s16(rowerData.getResistanceLevelRaw()) })
             if (rowerData.includeExpendedEnergy) add(ftmsField(RowerDataFlags.EXPENDED_ENERGY_PRESENT) {
                 u16(rowerData.getTotalEnergyKcal())
                 u16(rowerData.getEnergyPerHourKcal())
