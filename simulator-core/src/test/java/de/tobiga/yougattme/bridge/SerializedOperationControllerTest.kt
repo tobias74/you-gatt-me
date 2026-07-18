@@ -78,4 +78,22 @@ class SerializedOperationControllerTest {
         assertNull(queue.active)
         assertEquals(listOf("discover:false", "subscribe:false"), completed)
     }
+
+    @Test fun `nonfatal discovery timeout advances to remaining work`() {
+        val scheduler = FakeScheduler()
+        val started = mutableListOf<String>()
+        val completed = mutableListOf<String>()
+        val queue = SerializedOperationController<String>(
+            starter = { started += it; true }, timeoutMillis = { 1000 }, scheduler = scheduler,
+            completion = { operation, success, _ -> completed += "$operation:$success" },
+            continueAfterTimeout = { it == "optional" }
+        )
+        queue.enqueue("optional")
+        queue.enqueue("required")
+        scheduler.runNext()
+        assertEquals(listOf("optional", "required"), started)
+        assertEquals(listOf("optional:false"), completed)
+        queue.finishActive(true)
+        assertEquals(listOf("optional:false", "required:true"), completed)
+    }
 }

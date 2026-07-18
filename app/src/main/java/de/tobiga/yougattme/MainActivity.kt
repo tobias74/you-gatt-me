@@ -51,6 +51,7 @@ import de.tobiga.yougattme.gatt.fitnessmachine.FtmsMeasurementSnapshot
 import de.tobiga.yougattme.gatt.fitnessmachine.FtmsProtocolEvent
 import de.tobiga.yougattme.gatt.fitnessmachine.summary
 import de.tobiga.yougattme.gatt.provider.GattProfileDefinition
+import de.tobiga.yougattme.gatt.provider.BridgeOutputDefinition
 import de.tobiga.yougattme.gatt.provider.GattProfileProvider
 import de.tobiga.yougattme.gatt.provider.GattProfileProviderLoader
 import de.tobiga.yougattme.gatt.provider.ProfileDependencies
@@ -115,6 +116,16 @@ class MainActivity : AppCompatActivity() {
     private data class ExclusiveProfileGroup(
         val groupKey: String,
         val profiles: List<GattProfileDefinition>
+    )
+
+    private data class RouteDefinition(
+        val key: String,
+        val title: String,
+        val service: StandardService?,
+        val protocolId: String,
+        val metrics: Set<Metric>,
+        val compatibleControls: Set<de.tobiga.yougattme.bridge.ControlCommand.Kind> = emptySet(),
+        val supportsCapabilityMirroring: Boolean = true
     )
 
     private data class ServiceProfileRow(
@@ -427,6 +438,18 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             panel.addView(button)
+            device.endpoints.mapNotNull { it.settingsActivityClassName }.distinct().forEach { activityClassName ->
+                panel.addView(MaterialButton(this).apply {
+                    text = "Configure input provider"
+                    isAllCaps = false
+                    setOnClickListener {
+                        runCatching { startActivity(Intent().setClassName(packageName, activityClassName)) }
+                            .onFailure {
+                                Toast.makeText(this@MainActivity, "Provider configuration is unavailable.", Toast.LENGTH_LONG).show()
+                            }
+                    }
+                })
+            }
             container.addView(panel, LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { topMargin = dp(8) })
@@ -438,21 +461,24 @@ class MainActivity : AppCompatActivity() {
         val container = binding.layoutBridgeRoutes
         container.removeAllViews()
         bridgeRouteStatusViews.clear()
-        routeDefinitions().forEach { (key, title, service) ->
-            val route = viewModel.bridgeState.routes.value.orEmpty()[key] ?: ServiceRoute(key, service)
-            container.addView(createRoutePanel(key, title, route), LinearLayout.LayoutParams(
+        routeDefinitions().forEach { definition ->
+            val route = viewModel.bridgeState.routes.value.orEmpty()[definition.key] ?: ServiceRoute(
+                definition.key, definition.service, outputProtocolId = definition.protocolId
+            )
+            container.addView(createRoutePanel(definition, route), LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { topMargin = dp(10) })
         }
     }
 
-    private fun createRoutePanel(outputKey: String, title: String, route: ServiceRoute): View {
+    private fun createRoutePanel(definition: RouteDefinition, route: ServiceRoute): View {
+        val outputKey = definition.key
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(12), dp(12), dp(12), dp(12))
             setBackgroundResource(R.drawable.simulator_toggle_group)
         }
-        panel.addView(bridgeText(title, bold = true))
+        panel.addView(bridgeText(definition.title, bold = true))
         val resolved = viewModel.bridgeState.resolvedRoutes.value.orEmpty()[outputKey]
         val status = when (resolved?.freshness) {
             RouteFreshness.FRESH -> "Fresh"
@@ -466,7 +492,7 @@ class MainActivity : AppCompatActivity() {
 
         panel.addView(bridgeText("Measurement source", muted = true))
         val endpoints = readyEndpoints().filter { endpoint ->
-            endpoint.supportedMetrics.any { it in routeMetrics(outputKey) }
+            endpoint.supportedMetrics.any { it in definition.metrics }
         }
         val sourceChoices = listOf("Manual sliders" to RouteSource.Manual) +
             endpoints.map { it.label to RouteSource.Endpoint(it.id) }
@@ -476,7 +502,7 @@ class MainActivity : AppCompatActivity() {
                 val selectedEndpoint = (source as? RouteSource.Endpoint)?.let { selected ->
                     readyEndpoints().firstOrNull { it.id == selected.endpointId }
                 }
-                if (selectedEndpoint?.service != route.outputService) {
+                if (selectedEndpoint?.protocolId != route.outputProtocolId) {
                     bridgeService?.setCapabilityMode(outputKey, CapabilityMode.SIMULATOR_CONFIGURATION)
                         ?: viewModel.bridgeState.setCapabilityMode(outputKey, CapabilityMode.SIMULATOR_CONFIGURATION)
                     appliedCapabilityMirrors.remove(outputKey)
@@ -498,7 +524,7 @@ class MainActivity : AppCompatActivity() {
             overrides.visibility = if (overrides.visibility == View.VISIBLE) View.GONE else View.VISIBLE
         }
         panel.addView(overridesButton)
-        routeMetrics(outputKey).forEach { metric ->
+        definition.metrics.forEach { metric ->
             overrides.addView(bridgeText(metric.displayName, muted = true))
             val choices = listOf("Inherit service source" to RouteSource.Inherit, "Manual slider/value" to RouteSource.Manual) +
                 readyEndpoints().filter { metric in it.supportedMetrics }.map { it.label to RouteSource.Endpoint(it.id) }
@@ -513,7 +539,12 @@ class MainActivity : AppCompatActivity() {
         panel.addView(overrides)
 
         panel.addView(bridgeText("Control Point destination", muted = true))
-        val remoteControls = readyEndpoints().filter { it.service == route.outputService && it.controlPointCharacteristic != null }
+        val remoteControls = readyEndpoints().filter { endpoint ->
+            endpoint.controlPointCharacteristic != null && (
+                endpoint.protocolId == route.outputProtocolId ||
+                    endpoint.controlCapabilities.any { it in definition.compatibleControls }
+                )
+        }
         val controlChoices = listOf("Local simulator" to ControlRoute.LocalSimulator) +
             remoteControls.map { it.label to ControlRoute.Remote(it.id) }
         val activeControl = viewModel.bridgeState.controlRoutes.value.orEmpty()[outputKey] ?: ControlRoute.LocalSimulator
@@ -536,7 +567,7 @@ class MainActivity : AppCompatActivity() {
                     mirroredEndpoint = (route.defaultSource as? RouteSource.Endpoint)?.let { source ->
                         readyEndpoints().firstOrNull { it.id == source.endpointId }
                     }
-                    if (mirroredEndpoint?.service != route.outputService) {
+                    if (!definition.supportsCapabilityMirroring || mirroredEndpoint?.protocolId != route.outputProtocolId) {
                         Toast.makeText(this@MainActivity, "Capability mirroring requires a same-protocol measurement source.", Toast.LENGTH_LONG).show()
                         capabilitySpinner.setSelection(0, false)
                         return
@@ -576,7 +607,7 @@ class MainActivity : AppCompatActivity() {
             val route = viewModel.bridgeState.routes.value.orEmpty()[outputKey] ?: return@forEach
             val endpointId = (route.defaultSource as? RouteSource.Endpoint)?.endpointId ?: return@forEach
             val endpoint = ready[endpointId] ?: return@forEach
-            if (endpoint.service != route.outputService || appliedCapabilityMirrors[outputKey] == endpointId) return@forEach
+            if (endpoint.protocolId != route.outputProtocolId || appliedCapabilityMirrors[outputKey] == endpointId) return@forEach
             if (route.outputService == StandardService.FTMS) selectMirroredFtmsMachine(endpoint)
             if (service.setCapabilityMode(outputKey, mode)) {
                 appliedCapabilityMirrors[outputKey] = endpointId
@@ -667,16 +698,40 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun readyEndpoints(): List<SourceEndpoint> = viewModel.bridgeState.devices.value.orEmpty().values
-        .filter { it.status == InputConnectionStatus.READY }
         .flatMap { it.endpoints }
+        .filter { it.initialized }
 
-    private fun routeDefinitions() = listOf(
-        Triple("ftms", "FTMS output", StandardService.FTMS),
-        Triple("cycling_power", "Cycling Power output", StandardService.CYCLING_POWER),
-        Triple("csc", "CSC output", StandardService.CSC),
-        Triple("rsc", "RSC output", StandardService.RSC),
-        Triple("heart_rate", "Heart Rate output", StandardService.HEART_RATE)
-    )
+    private fun routeDefinitions(): List<RouteDefinition> {
+        val standard = listOf(
+            RouteDefinition("ftms", "FTMS output", StandardService.FTMS, StandardService.FTMS.name,
+                routeMetrics("ftms").toSet(), setOf(
+                    de.tobiga.yougattme.bridge.ControlCommand.Kind.REQUEST_CONTROL,
+                    de.tobiga.yougattme.bridge.ControlCommand.Kind.RESET,
+                    de.tobiga.yougattme.bridge.ControlCommand.Kind.START,
+                    de.tobiga.yougattme.bridge.ControlCommand.Kind.STOP,
+                    de.tobiga.yougattme.bridge.ControlCommand.Kind.TARGET_POWER,
+                    de.tobiga.yougattme.bridge.ControlCommand.Kind.BASIC_RESISTANCE,
+                    de.tobiga.yougattme.bridge.ControlCommand.Kind.SIMULATION_PARAMETERS,
+                    de.tobiga.yougattme.bridge.ControlCommand.Kind.WHEEL_CONFIGURATION,
+                    de.tobiga.yougattme.bridge.ControlCommand.Kind.CALIBRATION
+                )),
+            RouteDefinition("cycling_power", "Cycling Power output", StandardService.CYCLING_POWER,
+                StandardService.CYCLING_POWER.name, routeMetrics("cycling_power").toSet()),
+            RouteDefinition("csc", "CSC output", StandardService.CSC, StandardService.CSC.name,
+                routeMetrics("csc").toSet()),
+            RouteDefinition("rsc", "RSC output", StandardService.RSC, StandardService.RSC.name,
+                routeMetrics("rsc").toSet()),
+            RouteDefinition("heart_rate", "Heart Rate output", StandardService.HEART_RATE,
+                StandardService.HEART_RATE.name, routeMetrics("heart_rate").toSet())
+        )
+        val extensions = profiles.values.mapNotNull { it.bridgeOutput }.distinctBy { it.outputKey }.map { output ->
+            RouteDefinition(
+                output.outputKey, output.title, output.standardService, output.protocolId,
+                output.routableMetrics, output.compatibleControls, output.supportsCapabilityMirroring
+            )
+        }
+        return (standard + extensions).distinctBy { it.key }
+    }
 
     private fun routeMetrics(outputKey: String): List<Metric> = when (outputKey) {
         "ftms" -> listOf(Metric.SPEED_MPS, Metric.CADENCE_RPM, Metric.POWER_WATTS,
@@ -963,6 +1018,7 @@ class MainActivity : AppCompatActivity() {
                 setTextColor(ContextCompat.getColor(this@MainActivity, R.color.simulator_ink_muted))
                 textSize = 13f
             })
+
         }
     }
 
@@ -1645,6 +1701,20 @@ class MainActivity : AppCompatActivity() {
                 ).also { params -> params.topMargin = dp(4) }
             })
 
+            profile.configurationActivityClassName?.let { activityClassName ->
+                addView(MaterialButton(this@MainActivity).apply {
+                    text = "Configure"
+                    isAllCaps = false
+                    setOnClickListener {
+                        runCatching {
+                            startActivity(Intent().setClassName(packageName, activityClassName))
+                        }.onFailure {
+                            Toast.makeText(this@MainActivity, "Provider configuration is unavailable.", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                })
+            }
+
             addDivider(this)
             addView(TextView(this@MainActivity).apply {
                 text = if (profile.exclusiveGroup != null) {
@@ -2081,7 +2151,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun createSelectedGattProfiles(): List<AbstractGattProfile> {
-        val dependencies = ProfileDependencies(viewModel)
+        val dependencies = ProfileDependencies(viewModel, context = applicationContext)
         return selectedProfiles().map { profile ->
             val provider = profileProviderByKey[profile.key]
                 ?: error("No GATT profile provider registered for ${profile.key}")

@@ -20,6 +20,6 @@ include ':app'
 include ':simulator-core'
 
 def localSettings = file("local.settings.gradle")
-if (localSettings.exists()) {
+if (!providers.gradleProperty("publicStandalone").isPresent() && localSettings.exists()) {
     apply from: localSettings
 }

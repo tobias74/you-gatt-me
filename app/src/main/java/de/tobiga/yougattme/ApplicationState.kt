@@ -457,7 +457,9 @@ class ApplicationState private constructor(private val context: Context) {
         }
 
         bluetoothLeAdvertiser.let {
-            bluetoothManager.adapter.name = "YouGattMe"
+            bluetoothManager.adapter.name = prefs.getString(
+                "simulator.advertised-device-name", "YouGattMe"
+            )?.takeIf(String::isNotBlank) ?: "YouGattMe"
 
             val settings = AdvertiseSettings.Builder()
                 .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)

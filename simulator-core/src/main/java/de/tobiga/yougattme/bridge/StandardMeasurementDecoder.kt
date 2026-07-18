@@ -1,6 +1,7 @@
 package de.tobiga.yougattme.bridge
 
 import java.util.UUID
+import kotlin.math.roundToInt
 
 /** Strict, side-effect-free decoders for the standard services accepted by the bridge. */
 object StandardMeasurementDecoder {
@@ -396,6 +397,182 @@ object StandardInputAdapter : InputAdapter {
         StandardBleUuids.HEART_RATE_MEASUREMENT -> setOf(Metric.HEART_RATE_BPM,
             Metric.HEART_RATE_ENERGY_KJ, Metric.RR_INTERVAL_SECONDS)
         else -> emptySet()
+    }
+    override fun controlCapabilities(serviceUuid: UUID): Set<ControlCommand.Kind> =
+        if (StandardService.fromUuid(serviceUuid) == StandardService.FTMS) setOf(
+            ControlCommand.Kind.REQUEST_CONTROL, ControlCommand.Kind.RELEASE_CONTROL,
+            ControlCommand.Kind.RESET, ControlCommand.Kind.START, ControlCommand.Kind.STOP,
+            ControlCommand.Kind.TARGET_POWER, ControlCommand.Kind.BASIC_RESISTANCE,
+            ControlCommand.Kind.SIMULATION_PARAMETERS, ControlCommand.Kind.WHEEL_CONFIGURATION,
+            ControlCommand.Kind.CALIBRATION
+        ) else emptySet()
+
+    override fun controlCapabilities(
+        serviceUuid: UUID,
+        capabilityValues: Map<UUID, ByteArray>
+    ): Set<ControlCommand.Kind> {
+        val fallback = controlCapabilities(serviceUuid)
+        if (StandardService.fromUuid(serviceUuid) != StandardService.FTMS) return fallback
+        val feature = capabilityValues[StandardBleUuids.FTMS_FEATURE] ?: return fallback
+        if (feature.size < 8) return fallback
+        val targetBits = (feature[4].toLong() and 0xFF) or
+            ((feature[5].toLong() and 0xFF) shl 8) or
+            ((feature[6].toLong() and 0xFF) shl 16) or
+            ((feature[7].toLong() and 0xFF) shl 24)
+        fun supported(bit: Int) = targetBits and (1L shl bit) != 0L
+        return buildSet {
+            add(ControlCommand.Kind.REQUEST_CONTROL)
+            add(ControlCommand.Kind.RELEASE_CONTROL)
+            add(ControlCommand.Kind.RESET)
+            add(ControlCommand.Kind.START)
+            add(ControlCommand.Kind.STOP)
+            if (supported(0)) add(ControlCommand.Kind.TARGET_SPEED)
+            if (supported(1)) add(ControlCommand.Kind.TARGET_INCLINATION)
+            if (supported(2)) add(ControlCommand.Kind.BASIC_RESISTANCE)
+            if (supported(3)) add(ControlCommand.Kind.TARGET_POWER)
+            if (supported(4)) add(ControlCommand.Kind.TARGET_HEART_RATE)
+            if (supported(5)) add(ControlCommand.Kind.TARGET_ENERGY)
+            if (supported(8)) add(ControlCommand.Kind.TARGET_DISTANCE)
+            if (supported(9)) add(ControlCommand.Kind.TARGET_TRAINING_TIME)
+            if (supported(13)) add(ControlCommand.Kind.SIMULATION_PARAMETERS)
+            if (supported(14)) add(ControlCommand.Kind.WHEEL_CONFIGURATION)
+            if (supported(15)) add(ControlCommand.Kind.CALIBRATION)
+        }
+    }
+
+    override fun encodeControlTransactions(
+        command: ControlCommand,
+        endpoint: SourceEndpoint?
+    ): List<AdapterTransaction> {
+        if (endpoint?.service != StandardService.FTMS) return emptyList()
+        val feature = endpoint.capabilityValues[StandardBleUuids.FTMS_FEATURE]
+        if (feature != null && feature.size >= 8 && command.kind !in controlCapabilities(
+                StandardService.FTMS.serviceUuid, endpoint.capabilityValues
+            )) return emptyList()
+        fun little16(value: Int) = byteArrayOf(value.toByte(), (value ushr 8).toByte())
+        fun little24(value: Int) = byteArrayOf(value.toByte(), (value ushr 8).toByte(), (value ushr 16).toByte())
+        fun u16(value: Double, scale: Double): Int? {
+            if (!value.isFinite()) return null
+            val raw = (value / scale).roundToInt()
+            return raw.takeIf { it in 0..0xFFFF }
+        }
+        fun signed16(value: Double, scale: Double): ByteArray? {
+            if (!value.isFinite()) return null
+            val raw = (value / scale).roundToInt()
+            return raw.takeIf { it in Short.MIN_VALUE..Short.MAX_VALUE }?.let(::little16)
+        }
+        fun signedRange(uuid: UUID): IntRange? {
+            val range = endpoint.capabilityValues[uuid]?.takeIf { it.size >= 4 } ?: return null
+            fun value(offset: Int) = ((range[offset].toInt() and 0xFF) or
+                ((range[offset + 1].toInt() and 0xFF) shl 8)).toShort().toInt()
+            return value(0)..value(2)
+        }
+        fun unsignedRange(uuid: UUID): IntRange? {
+            val range = endpoint.capabilityValues[uuid]?.takeIf { it.size >= 4 } ?: return null
+            fun value(offset: Int) = (range[offset].toInt() and 0xFF) or
+                ((range[offset + 1].toInt() and 0xFF) shl 8)
+            return value(0)..value(2)
+        }
+        val request = when (command) {
+            ControlCommand.RequestControl -> byteArrayOf(0x00)
+            ControlCommand.ReleaseControl, ControlCommand.Reset -> byteArrayOf(0x01)
+            ControlCommand.Start -> byteArrayOf(0x07)
+            is ControlCommand.Stop -> byteArrayOf(0x08, if (command.pause) 0x02 else 0x01)
+            is ControlCommand.TargetSpeed -> {
+                val raw = u16(command.metersPerSecond, 1.0 / 360.0) ?: return emptyList()
+                val range = unsignedRange(StandardBleUuids.FTMS_SUPPORTED_SPEED_RANGE)
+                if (range != null && raw !in range) return emptyList()
+                byteArrayOf(0x02) + little16(raw)
+            }
+            is ControlCommand.TargetInclination -> {
+                val rawBytes = signed16(command.percent, 0.1) ?: return emptyList()
+                val raw = (command.percent / 0.1).roundToInt()
+                val range = signedRange(StandardBleUuids.FTMS_SUPPORTED_INCLINATION_RANGE)
+                if (range != null && raw !in range) return emptyList()
+                byteArrayOf(0x03) + rawBytes
+            }
+            is ControlCommand.TargetPower -> {
+                val rawBytes = signed16(command.watts, 1.0) ?: return emptyList()
+                val raw = command.watts.roundToInt()
+                val range = signedRange(StandardBleUuids.FTMS_SUPPORTED_POWER_RANGE)
+                if (range != null && raw !in range) return emptyList()
+                byteArrayOf(0x05) + rawBytes
+            }
+            is ControlCommand.BasicResistance -> {
+                if (command.percent !in 0.0..100.0) return emptyList()
+                val range = endpoint.capabilityValues[StandardBleUuids.FTMS_SUPPORTED_RESISTANCE_RANGE]
+                    ?.takeIf { it.size >= 4 } ?: return emptyList()
+                fun s16(offset: Int) = ((range[offset].toInt() and 0xFF) or
+                    ((range[offset + 1].toInt() and 0xFF) shl 8)).toShort().toInt()
+                val minimum = s16(0)
+                val maximum = s16(2)
+                if (maximum <= minimum) return emptyList()
+                val raw = (minimum + (maximum - minimum) * command.percent / 100.0).roundToInt()
+                byteArrayOf(0x04) + little16(raw)
+            }
+            is ControlCommand.TargetHeartRate -> {
+                if (command.bpm !in 0..0xFF) return emptyList()
+                val range = endpoint.capabilityValues[StandardBleUuids.FTMS_SUPPORTED_HEART_RATE_RANGE]
+                if (range != null && range.size >= 2 && command.bpm !in
+                    (range[0].toInt() and 0xFF)..(range[1].toInt() and 0xFF)) return emptyList()
+                byteArrayOf(0x06, command.bpm.toByte())
+            }
+            is ControlCommand.TargetEnergy -> {
+                if (command.kilocalories !in 0..0xFFFF) return emptyList()
+                byteArrayOf(0x09) + little16(command.kilocalories)
+            }
+            is ControlCommand.TargetDistance -> {
+                if (!command.meters.isFinite()) return emptyList()
+                val raw = command.meters.roundToInt()
+                if (raw !in 0..0xFF_FFFF) return emptyList()
+                byteArrayOf(0x0C) + little24(raw)
+            }
+            is ControlCommand.TargetTrainingTime -> {
+                if (command.seconds !in 0..0xFFFF) return emptyList()
+                byteArrayOf(0x0D) + little16(command.seconds)
+            }
+            is ControlCommand.SimulationParameters -> {
+                val wind = signed16(command.windSpeedMetersPerSecond, 0.001) ?: return emptyList()
+                val grade = signed16(command.gradePercent, 0.01) ?: return emptyList()
+                val rolling = (command.rollingResistanceCoefficient / 0.0001).roundToInt()
+                val coefficient = (command.windResistanceCoefficient * command.draftingFactor / 0.01).roundToInt()
+                if (rolling !in 0..255 || coefficient !in 0..255) return emptyList()
+                byteArrayOf(0x11) + wind + grade + byteArrayOf(rolling.toByte(), coefficient.toByte())
+            }
+            is ControlCommand.WheelConfiguration -> {
+                val raw = (command.circumferenceMeters / 0.0001).roundToInt()
+                if (raw !in 0..0xFFFF) return emptyList()
+                byteArrayOf(0x12) + little16(raw)
+            }
+            is ControlCommand.Calibration -> {
+                if (!command.spinDown || command.zeroOffset) return emptyList()
+                byteArrayOf(0x13, 0x01)
+            }
+            else -> null
+        } ?: return emptyList()
+        return listOf(AdapterTransaction(
+            characteristicUuid = StandardBleUuids.FTMS_CONTROL_POINT,
+            value = request,
+            completion = TransactionCompletion.MATCHING_NOTIFICATION,
+            responseCharacteristicUuid = StandardBleUuids.FTMS_CONTROL_POINT,
+            timeoutMillis = if (command is ControlCommand.Calibration) 60_000L else 10_000L,
+            responseMatcher = { response -> response.size >= 3 && response[0].toInt() and 0xFF == 0x80 &&
+                response[1] == request[0] }
+        ))
+    }
+
+    override fun controlResult(command: ControlCommand, success: Boolean, response: ByteArray?): ControlResult {
+        if (!success || response == null || response.size < 3) {
+            return ControlResult(ControlStatus.FAILED, protocolResponse = response)
+        }
+        val status = when (response[2].toInt() and 0xFF) {
+            0x01 -> ControlStatus.SUCCESS
+            0x02 -> ControlStatus.UNSUPPORTED
+            0x03 -> ControlStatus.INVALID_PARAMETER
+            0x05 -> ControlStatus.REJECTED
+            else -> ControlStatus.FAILED
+        }
+        return ControlResult(status, response.copyOfRange(3, response.size), response)
     }
     override fun decode(characteristicUuid: UUID, value: ByteArray, timestampMillis: Long) =
         StandardMeasurementDecoder.decode(characteristicUuid, value, timestampMillis)

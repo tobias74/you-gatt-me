@@ -7,10 +7,13 @@ import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothStatusCodes
 import android.os.Handler
 import de.tobiga.yougattme.bridge.StandardBleUuids
+import de.tobiga.yougattme.bridge.GattWritePreference
+import de.tobiga.yougattme.bridge.TransactionCompletion
 import java.util.UUID
 
 internal sealed class GattOperation(
     val timeoutMillis: Long = 10_000L,
+    val fatalOnTimeout: Boolean = true,
     val completion: (Boolean, ByteArray?) -> Unit = { _, _ -> }
 ) {
     class RequestMtu(val mtu: Int, completion: (Boolean, ByteArray?) -> Unit = { _, _ -> }) :
@@ -23,11 +26,16 @@ internal sealed class GattOperation(
     class Write(
         val characteristic: BluetoothGattCharacteristic,
         val value: ByteArray,
-        val awaitIndication: Boolean,
+        val completionMode: TransactionCompletion,
+        val writePreference: GattWritePreference = GattWritePreference.WITH_RESPONSE,
+        val responseCharacteristicUuid: UUID? = null,
+        val responseMatcher: (ByteArray) -> Boolean = { true },
         timeoutMillis: Long,
+        fatalOnTimeout: Boolean = true,
         completion: (Boolean, ByteArray?) -> Unit
-    ) : GattOperation(timeoutMillis, completion)
+    ) : GattOperation(timeoutMillis, fatalOnTimeout, completion)
     class Barrier(completion: (Boolean, ByteArray?) -> Unit) : GattOperation(completion = completion)
+    class Delay(val delayMillis: Long) : GattOperation(timeoutMillis = delayMillis + 1_000L)
 }
 
 /** Android GATT permits only one outstanding ATT operation; this queue enforces that per device. */
@@ -50,7 +58,8 @@ internal class GattOperationQueue(
             waitingForIndication = false
             operation.completion(success, value)
         },
-        onTimeout = { onFatalTimeout() }
+        continueAfterTimeout = { operation -> !operation.fatalOnTimeout },
+        onTimeout = { operation -> if (operation.fatalOnTimeout) onFatalTimeout() }
     )
 
     fun enqueue(operation: GattOperation) {
@@ -83,13 +92,15 @@ internal class GattOperationQueue(
     fun onCharacteristicWrite(characteristic: BluetoothGattCharacteristic, status: Int) {
         val op = controller.active as? GattOperation.Write ?: return
         if (characteristic.uuid != op.characteristic.uuid) return
-        if (status != BluetoothGatt.GATT_SUCCESS || !op.awaitIndication) finish(status == BluetoothGatt.GATT_SUCCESS, null)
-        else waitingForIndication = true
+        if (status != BluetoothGatt.GATT_SUCCESS) finish(false, null)
+        else if (op.completionMode == TransactionCompletion.MATCHING_NOTIFICATION) waitingForIndication = true
+        else finish(true, null)
     }
 
     fun onCharacteristicChanged(characteristic: BluetoothGattCharacteristic, value: ByteArray): Boolean {
         val op = controller.active as? GattOperation.Write ?: return false
-        if (!waitingForIndication || characteristic.uuid != op.characteristic.uuid) return false
+        val expected = op.responseCharacteristicUuid ?: op.characteristic.uuid
+        if (!waitingForIndication || characteristic.uuid != expected || !op.responseMatcher(value)) return false
         finish(true, value)
         return true
     }
@@ -106,12 +117,38 @@ internal class GattOperationQueue(
             is GattOperation.Discover -> gatt.discoverServices()
             is GattOperation.Read -> gatt.readCharacteristic(operation.characteristic)
             is GattOperation.Subscribe -> subscribe(gatt, operation)
-            is GattOperation.Write -> gatt.writeCharacteristic(
-                operation.characteristic, operation.value,
-                BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-            ) == BluetoothStatusCodes.SUCCESS
+            is GattOperation.Write -> write(gatt, operation)
             is GattOperation.Barrier -> true
+            is GattOperation.Delay -> {
+                handler.postDelayed({ controller.finishActive(true, null) }, operation.delayMillis)
+                true
+            }
         }
+    }
+
+    private fun write(gatt: BluetoothGatt, operation: GattOperation.Write): Boolean {
+        val characteristic = operation.characteristic
+        val supportsNoResponse = characteristic.properties and
+            BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0
+        val supportsResponse = characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE != 0
+        val writeType = when (operation.writePreference) {
+            GattWritePreference.WITH_RESPONSE -> BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            GattWritePreference.WITHOUT_RESPONSE -> BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+            GattWritePreference.WITHOUT_RESPONSE_FALLBACK_WITH_RESPONSE -> if (supportsNoResponse) {
+                BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+            } else BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+        }
+        if (writeType == BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE && !supportsNoResponse) return false
+        if (writeType == BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT && !supportsResponse) return false
+        val started = gatt.writeCharacteristic(characteristic, operation.value, writeType) == BluetoothStatusCodes.SUCCESS
+        if (started && operation.completionMode == TransactionCompletion.MATCHING_NOTIFICATION &&
+            writeType == BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) {
+            waitingForIndication = true
+        }
+        if (started && operation.completionMode == TransactionCompletion.FIRE_AND_FORGET) {
+            controller.finishActive(true, null)
+        }
+        return started
     }
 
     private fun subscribe(gatt: BluetoothGatt, operation: GattOperation.Subscribe): Boolean {

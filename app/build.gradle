@@ -68,6 +68,6 @@ dependencies {
 }
 
 def localExtensions = rootProject.file("local.extensions.gradle")
-if (localExtensions.exists()) {
+if (!providers.gradleProperty("publicStandalone").isPresent() && localExtensions.exists()) {
     apply from: localExtensions
 }

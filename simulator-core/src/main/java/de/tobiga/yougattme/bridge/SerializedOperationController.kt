@@ -19,6 +19,7 @@ class SerializedOperationController<T>(
     private val timeoutMillis: (T) -> Long,
     private val scheduler: OperationTimeoutScheduler,
     private val completion: (T, Boolean, ByteArray?) -> Unit,
+    private val continueAfterTimeout: (T) -> Boolean = { false },
     private val onTimeout: (T) -> Unit = {}
 ) {
     private val pending = ArrayDeque<T>()
@@ -70,9 +71,12 @@ class SerializedOperationController<T>(
         timeoutCancellation = null
         active = null
         completion(operation, false, null)
-        // The ATT transaction is now ambiguous. Fail queued work and let the transport reconnect;
-        // otherwise a late callback could be mistaken for the next operation on the same UUID.
-        while (pending.isNotEmpty()) completion(pending.removeFirst(), false, null)
+        if (!continueAfterTimeout(operation)) {
+            // The ATT transaction is now ambiguous. Fail queued work and let the transport reconnect;
+            // otherwise a late callback could be mistaken for the next operation on the same UUID.
+            while (pending.isNotEmpty()) completion(pending.removeFirst(), false, null)
+        }
         onTimeout(operation)
+        if (continueAfterTimeout(operation)) startNext()
     }
 }

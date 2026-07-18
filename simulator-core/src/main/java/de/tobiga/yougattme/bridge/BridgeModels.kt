@@ -1,5 +1,6 @@
 package de.tobiga.yougattme.bridge
 
+import android.content.Context
 import java.util.UUID
 
 enum class StandardService(val shortName: String, val serviceUuid: UUID) {
@@ -68,7 +69,13 @@ data class SourceEndpoint(
     val supportedMetrics: Set<Metric>,
     val controlPointCharacteristic: UUID? = null,
     val initialized: Boolean = false,
-    val serviceName: String = service?.shortName ?: "Input adapter"
+    val serviceName: String = service?.shortName ?: "Input adapter",
+    /** Stable provider-defined identity. It deliberately does not imply a Bluetooth SIG service. */
+    val protocolId: String = service?.name ?: "input-adapter",
+    val controlCapabilities: Set<ControlCommand.Kind> = emptySet(),
+    val settingsActivityClassName: String? = null,
+    val serviceUuid: UUID? = service?.serviceUuid,
+    val capabilityValues: Map<UUID, ByteArray> = emptyMap()
 ) {
     val label: String
         get() = "${deviceName?.takeIf(String::isNotBlank) ?: deviceAddress} · $serviceName"
@@ -96,9 +103,10 @@ sealed interface RouteSource {
 
 data class ServiceRoute(
     val outputKey: String,
-    val outputService: StandardService,
+    val outputService: StandardService?,
     val defaultSource: RouteSource = RouteSource.Manual,
-    val fieldOverrides: Map<Metric, RouteSource> = emptyMap()
+    val fieldOverrides: Map<Metric, RouteSource> = emptyMap(),
+    val outputProtocolId: String = outputService?.name ?: outputKey
 )
 
 sealed interface ControlRoute {
@@ -131,6 +139,86 @@ data class EndpointCapabilities(
 )
 
 data class DeviceIdentity(val address: String, val name: String?)
+
+enum class GattWritePreference {
+    WITH_RESPONSE,
+    WITHOUT_RESPONSE,
+    WITHOUT_RESPONSE_FALLBACK_WITH_RESPONSE
+}
+
+enum class TransactionCompletion {
+    WRITE_CALLBACK,
+    FIRE_AND_FORGET,
+    MATCHING_NOTIFICATION
+}
+
+/** A provider-defined initialization write performed after subscriptions have completed. */
+data class AdapterTransaction(
+    val characteristicUuid: UUID,
+    val value: ByteArray,
+    val writePreference: GattWritePreference = GattWritePreference.WITH_RESPONSE,
+    val completion: TransactionCompletion = TransactionCompletion.WRITE_CALLBACK,
+    val responseCharacteristicUuid: UUID? = null,
+    val delayBeforeMillis: Long = 0L,
+    val timeoutMillis: Long = 10_000L,
+    val fatalOnTimeout: Boolean = true,
+    val responseMatcher: (ByteArray) -> Boolean = { true }
+)
+
+/** Protocol-neutral controls used when a command crosses a protocol boundary. */
+sealed interface ControlCommand {
+    val kind: Kind
+
+    enum class Kind {
+        REQUEST_CONTROL, RELEASE_CONTROL, RESET, START, STOP,
+        TARGET_SPEED, TARGET_INCLINATION, TARGET_POWER, BASIC_RESISTANCE,
+        TARGET_DISTANCE, TARGET_TRAINING_TIME, TARGET_ENERGY, TARGET_HEART_RATE,
+        SIMULATION_PARAMETERS,
+        WHEEL_CONFIGURATION, CALIBRATION, PROTOCOL_EXTENSION
+    }
+
+    data object RequestControl : ControlCommand { override val kind = Kind.REQUEST_CONTROL }
+    data object ReleaseControl : ControlCommand { override val kind = Kind.RELEASE_CONTROL }
+    data object Reset : ControlCommand { override val kind = Kind.RESET }
+    data object Start : ControlCommand { override val kind = Kind.START }
+    data class Stop(val pause: Boolean = false) : ControlCommand { override val kind = Kind.STOP }
+    data class TargetSpeed(val metersPerSecond: Double) : ControlCommand { override val kind = Kind.TARGET_SPEED }
+    data class TargetInclination(val percent: Double) : ControlCommand { override val kind = Kind.TARGET_INCLINATION }
+    data class TargetPower(val watts: Double) : ControlCommand { override val kind = Kind.TARGET_POWER }
+    data class BasicResistance(val percent: Double) : ControlCommand { override val kind = Kind.BASIC_RESISTANCE }
+    data class TargetDistance(val meters: Double) : ControlCommand { override val kind = Kind.TARGET_DISTANCE }
+    data class TargetTrainingTime(val seconds: Int) : ControlCommand { override val kind = Kind.TARGET_TRAINING_TIME }
+    data class TargetEnergy(val kilocalories: Int) : ControlCommand { override val kind = Kind.TARGET_ENERGY }
+    data class TargetHeartRate(val bpm: Int) : ControlCommand { override val kind = Kind.TARGET_HEART_RATE }
+    data class SimulationParameters(
+        val windSpeedMetersPerSecond: Double,
+        val gradePercent: Double,
+        val rollingResistanceCoefficient: Double,
+        val windResistanceCoefficient: Double,
+        val draftingFactor: Double = 1.0
+    ) : ControlCommand { override val kind = Kind.SIMULATION_PARAMETERS }
+    data class WheelConfiguration(
+        val circumferenceMeters: Double,
+        val riderWeightKg: Double? = null,
+        val bikeWeightKg: Double? = null
+    ) : ControlCommand { override val kind = Kind.WHEEL_CONFIGURATION }
+    data class Calibration(val spinDown: Boolean, val zeroOffset: Boolean = false) : ControlCommand {
+        override val kind = Kind.CALIBRATION
+    }
+    data class ProtocolExtension(val namespace: String, val payload: ByteArray) : ControlCommand {
+        override val kind = Kind.PROTOCOL_EXTENSION
+    }
+}
+
+enum class ControlStatus { SUCCESS, UNSUPPORTED, INVALID_PARAMETER, REJECTED, FAILED, TIMEOUT }
+
+data class ControlResult(
+    val status: ControlStatus,
+    val responseData: ByteArray = ByteArray(0),
+    val protocolResponse: ByteArray? = null
+) {
+    val success: Boolean get() = status == ControlStatus.SUCCESS
+}
 
 fun bluetoothUuid(shortUuid: Int): UUID =
     UUID.fromString("0000%04X-0000-1000-8000-00805F9B34FB".format(shortUuid and 0xFFFF))
@@ -196,9 +284,33 @@ interface InputAdapter {
     val statusCharacteristics: Set<UUID> get() = emptySet()
     val controlPointCharacteristics: Set<UUID> get() = emptySet()
     val readableCapabilityCharacteristics: Set<UUID> get() = emptySet()
+    val protocolId: String get() = providerId
+    val preferredWriteType: GattWritePreference get() = GattWritePreference.WITH_RESPONSE
+    val controlCapabilities: Set<ControlCommand.Kind> get() = emptySet()
+    val settingsActivityClassName: String? get() = null
+    val requiresFirstMeasurementBeforeReady: Boolean get() = false
+    fun initialize(context: Context) = Unit
+    fun qualifiesAsReadyMeasurement(measurement: DecodedMeasurement): Boolean = true
+    fun protocolId(serviceUuid: UUID): String = StandardService.fromUuid(serviceUuid)?.name ?: protocolId
+    fun controlCapabilities(serviceUuid: UUID): Set<ControlCommand.Kind> = controlCapabilities
+    fun controlCapabilities(
+        serviceUuid: UUID,
+        capabilityValues: Map<UUID, ByteArray>
+    ): Set<ControlCommand.Kind> = controlCapabilities(serviceUuid)
     fun serviceName(serviceUuid: UUID): String
     fun supportedMetrics(characteristicUuid: UUID): Set<Metric>
+    fun matchesAdvertisement(serviceUuids: Set<UUID>): Boolean = serviceUuids.any { it in supportedServices }
+    fun initializationTransactions(serviceUuid: UUID): List<AdapterTransaction> = emptyList()
+    fun followUpTransactions(endpointId: String, measurement: DecodedMeasurement): List<AdapterTransaction> = emptyList()
+    fun encodeControl(command: ControlCommand): AdapterTransaction? = null
+    fun encodeControlTransactions(command: ControlCommand, endpoint: SourceEndpoint? = null): List<AdapterTransaction> =
+        encodeControl(command)?.let(::listOf).orEmpty()
+    fun handleControlLocally(command: ControlCommand): ControlResult? = null
+    fun controlResult(command: ControlCommand, success: Boolean, response: ByteArray?): ControlResult =
+        ControlResult(if (success) ControlStatus.SUCCESS else ControlStatus.FAILED, protocolResponse = response)
     fun decode(characteristicUuid: UUID, value: ByteArray, timestampMillis: Long): DecodedMeasurement?
+    fun decode(endpointId: String, characteristicUuid: UUID, value: ByteArray, timestampMillis: Long): DecodedMeasurement? =
+        decode(characteristicUuid, value, timestampMillis)
 }
 
 interface InputAdapterProvider {
@@ -206,10 +318,15 @@ interface InputAdapterProvider {
     fun createAdapters(): List<InputAdapter>
 }
 
-class InputAdapterRegistry(providers: Iterable<InputAdapterProvider>) {
+class InputAdapterRegistry(providers: Iterable<InputAdapterProvider>, context: Context? = null) {
     private val adapters = providers.flatMap(InputAdapterProvider::createAdapters)
+        .onEach { adapter -> context?.let(adapter::initialize) }
     fun adapterFor(serviceUuid: UUID): InputAdapter? =
         adapters.firstOrNull { serviceUuid in it.supportedServices }
+    fun adapterForProtocol(protocolId: String): InputAdapter? = adapters.firstOrNull { adapter ->
+        adapter.protocolId == protocolId || adapter.supportedServices.any { adapter.protocolId(it) == protocolId }
+    }
+    fun matchesAdvertisement(serviceUuids: Set<UUID>): Boolean = adapters.any { it.matchesAdvertisement(serviceUuids) }
     val supportedServiceUuids: Set<UUID> = adapters.flatMap(InputAdapter::supportedServices).toSet()
 }
 

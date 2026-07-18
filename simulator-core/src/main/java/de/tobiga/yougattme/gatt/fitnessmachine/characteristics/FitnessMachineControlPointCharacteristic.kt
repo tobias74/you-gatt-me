@@ -17,6 +17,9 @@ import de.tobiga.yougattme.gatt.fitnessmachine.FtmsTargetState
 import de.tobiga.yougattme.gatt.fitnessmachine.IndoorCyclingSimulationParameters
 import de.tobiga.yougattme.tools.toHex
 import de.tobiga.yougattme.bridge.RemoteControlDispatcher
+import de.tobiga.yougattme.bridge.ControlCommand
+import de.tobiga.yougattme.bridge.ControlStatus
+import de.tobiga.yougattme.bridge.StandardService
 import java.util.UUID
 
 object REQUEST_CODE {
@@ -174,6 +177,31 @@ class FitnessMachineControlPointCharacteristic(
                 return
             }
         }
+        val semanticCommand = semanticCommand(requestCode, value)
+        if (semanticCommand != null && RemoteControlDispatcher.forwardSemanticIfConfigured(
+                outputKey = "ftms",
+                command = semanticCommand,
+                sameProtocolId = StandardService.FTMS.name
+            ) { remote ->
+                if (!procedureInProgress || procedureDeviceAddress != device.address) return@forwardSemanticIfConfigured
+                var resultCode = when (remote.status) {
+                    ControlStatus.SUCCESS -> RESULT_CODE.SUCCESS
+                    ControlStatus.UNSUPPORTED -> RESULT_CODE.OP_CODE_NOT_SUPPORTED
+                    ControlStatus.INVALID_PARAMETER -> RESULT_CODE.INVALID_PARAMETER
+                    ControlStatus.REJECTED -> RESULT_CODE.CONTROL_NOT_PERMITTED
+                    else -> RESULT_CODE.OPERATION_FAILED
+                }
+                if (requestCode == REQUEST_CODE.REQUEST_CONTROL && resultCode == RESULT_CODE.SUCCESS) {
+                    controlOwner = device
+                    mainViewModel.controlHasBeenTakenInControlPoint.postValue(true)
+                    mainViewModel.ftmsControlOwnerAddress.postValue(device.address)
+                } else if (resultCode == RESULT_CODE.SUCCESS) {
+                    val local = handleProcedure(device, requestCode, value)
+                    if (local.resultCode != RESULT_CODE.SUCCESS) resultCode = RESULT_CODE.OPERATION_FAILED
+                }
+                sendControlPointResponse(device, requestCode, resultCode, remote.responseData)
+            }) return
+
         if (RemoteControlDispatcher.forwardIfConfigured(
                 outputKey = "ftms",
                 request = value,
@@ -200,6 +228,50 @@ class FitnessMachineControlPointCharacteristic(
         }
         val result = handleProcedure(device, requestCode, value)
         sendControlPointResponse(device, requestCode, result.resultCode, result.responseParameters)
+    }
+
+    private fun semanticCommand(requestCode: Int, value: ByteArray): ControlCommand? {
+        fun u16(offset: Int): Int = (value[offset].toInt() and 0xFF) or
+            ((value[offset + 1].toInt() and 0xFF) shl 8)
+        fun s16(offset: Int): Int = u16(offset).toShort().toInt()
+        return when (requestCode) {
+            REQUEST_CODE.REQUEST_CONTROL -> value.takeIf { it.size == 1 }?.let { ControlCommand.RequestControl }
+            REQUEST_CODE.RESET -> value.takeIf { it.size == 1 }?.let { ControlCommand.Reset }
+            REQUEST_CODE.START_OR_RESUME -> value.takeIf { it.size == 1 }?.let { ControlCommand.Start }
+            REQUEST_CODE.STOP_OR_PAUSE -> value.takeIf { it.size == 2 }?.let {
+                ControlCommand.Stop(pause = (it[1].toInt() and 0xFF) == 0x02)
+            }
+            REQUEST_CODE.SET_TARGET_POWER -> value.takeIf { it.size == 3 }?.let {
+                val watts = s16(1).toDouble()
+                watts.takeIf { requested ->
+                    requested in mainViewModel.ftmsSupportedRanges.minPowerWatt.toDouble()..
+                        mainViewModel.ftmsSupportedRanges.maxPowerWatt.toDouble()
+                }?.let(ControlCommand::TargetPower)
+            }
+            REQUEST_CODE.SET_TARGET_RESISTANCE_LEVEL -> value.takeIf { it.size == 3 }?.let {
+                val range = mainViewModel.ftmsSupportedRanges
+                val minimum = range.minResistanceLevel.toDouble()
+                val maximum = range.maxResistanceLevel.toDouble()
+                if (maximum <= minimum) null else {
+                    val level = s16(1) / 10.0
+                    if (level !in minimum..maximum) null
+                    else ControlCommand.BasicResistance((level - minimum) * 100.0 / (maximum - minimum))
+                }
+            }
+            REQUEST_CODE.SET_INDOOR_BIKE_SIMULATION -> value.takeIf { it.size == 7 }?.let {
+                ControlCommand.SimulationParameters(
+                    windSpeedMetersPerSecond = s16(1) / 1000.0,
+                    gradePercent = s16(3) / 100.0,
+                    rollingResistanceCoefficient = (it[5].toInt() and 0xFF) / 10_000.0,
+                    windResistanceCoefficient = (it[6].toInt() and 0xFF) / 100.0
+                )
+            }
+            REQUEST_CODE.SET_WHEEL_CIRCUMFERENCE -> value.takeIf { it.size == 3 }
+                ?.let { ControlCommand.WheelConfiguration(u16(1) / 10_000.0) }
+            REQUEST_CODE.SPIN_DOWN_CONTROL -> value.takeIf { it.size == 2 && (it[1].toInt() and 0xFF) == SPIN_DOWN_START }
+                ?.let { ControlCommand.Calibration(spinDown = true) }
+            else -> null
+        }
     }
 
     private fun handleProcedure(device: BluetoothDevice, requestCode: Int, value: ByteArray): ControlPointProcedureResult {
