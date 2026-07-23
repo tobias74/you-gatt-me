@@ -6,7 +6,15 @@ import android.os.Looper
 import java.util.ArrayDeque
 import java.util.concurrent.atomic.AtomicLong
 
-enum class InputConnectionStatus { DISCOVERED, CONNECTING, INITIALIZING, READY, RECONNECTING, DISCONNECTED, ERROR }
+enum class InputConnectionStatus {
+    DISCOVERED, CONNECTING, INITIALIZING, PROTOCOL_SELECTION_REQUIRED,
+    READY, RECONNECTING, DISCONNECTED, ERROR
+}
+
+data class InputProtocolOption(
+    val adapterId: String,
+    val displayName: String
+)
 
 data class InputDeviceState(
     val identity: DeviceIdentity,
@@ -14,7 +22,10 @@ data class InputDeviceState(
     val status: InputConnectionStatus = InputConnectionStatus.DISCOVERED,
     val advertisedServices: Set<StandardService> = emptySet(),
     val endpoints: List<SourceEndpoint> = emptyList(),
-    val detail: String? = null
+    val detail: String? = null,
+    val protocolCandidates: List<InputProtocolOption> = emptyList(),
+    val resolvedAdapterIds: Set<String> = emptySet(),
+    val protocolOverride: String? = null
 )
 
 data class BridgeLogEntry(
@@ -37,7 +48,11 @@ class BridgeStateStore private constructor() {
     val routes: LiveData<Map<String, ServiceRoute>> = _routes
     private val _controlRoutes = MutableLiveData<Map<String, ControlRoute>>(emptyMap())
     val controlRoutes: LiveData<Map<String, ControlRoute>> = _controlRoutes
+    private val _capabilityRoutes = MutableLiveData<Map<String, CapabilityRoute>>(emptyMap())
+    val capabilityRoutes: LiveData<Map<String, CapabilityRoute>> = _capabilityRoutes
+    @Deprecated("Use capabilityRoutes")
     private val _capabilityModes = MutableLiveData<Map<String, CapabilityMode>>(emptyMap())
+    @Deprecated("Use capabilityRoutes")
     val capabilityModes: LiveData<Map<String, CapabilityMode>> = _capabilityModes
     private val _samples = MutableLiveData<Map<String, Map<Metric, MetricSample>>>(emptyMap())
     val samples: LiveData<Map<String, Map<Metric, MetricSample>>> = _samples
@@ -85,8 +100,29 @@ class BridgeStateStore private constructor() {
     }
 
     @Synchronized
+    fun setCapabilityRoute(outputKey: String, route: CapabilityRoute) {
+        _capabilityRoutes.publish(_capabilityRoutes.value.orEmpty() + (outputKey to route))
+        val legacyMode = when (route) {
+            CapabilityRoute.SimulatorConfiguration -> CapabilityMode.SIMULATOR_CONFIGURATION
+            is CapabilityRoute.Mirror -> CapabilityMode.MIRROR_CONNECTED_SERVICE
+        }
+        _capabilityModes.publish(_capabilityModes.value.orEmpty() + (outputKey to legacyMode))
+    }
+
+    @Deprecated("Use setCapabilityRoute")
+    @Synchronized
     fun setCapabilityMode(outputKey: String, mode: CapabilityMode) {
-        _capabilityModes.publish(_capabilityModes.value.orEmpty() + (outputKey to mode))
+        val route = when (mode) {
+            CapabilityMode.SIMULATOR_CONFIGURATION -> CapabilityRoute.SimulatorConfiguration
+            CapabilityMode.MIRROR_CONNECTED_SERVICE -> {
+                val endpointId = (_capabilityRoutes.value.orEmpty()[outputKey] as? CapabilityRoute.Mirror)?.endpointId
+                    ?: _routes.value.orEmpty()[outputKey]?.fieldOverrides?.values
+                        ?.filterIsInstance<RouteSource.Endpoint>()?.firstOrNull()?.endpointId
+                    ?: (_routes.value.orEmpty()[outputKey]?.defaultSource as? RouteSource.Endpoint)?.endpointId
+                endpointId?.let { CapabilityRoute.Mirror(it) } ?: CapabilityRoute.SimulatorConfiguration
+            }
+        }
+        setCapabilityRoute(outputKey, route)
     }
 
     @Synchronized

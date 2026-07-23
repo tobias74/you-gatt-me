@@ -33,7 +33,9 @@ import de.tobiga.yougattme.MainActivity
 import de.tobiga.yougattme.R
 import de.tobiga.yougattme.SimulationStateStore
 import de.tobiga.yougattme.bridge.BridgeStateStore
+import de.tobiga.yougattme.bridge.CapabilityRoute
 import de.tobiga.yougattme.bridge.CapabilityMode
+import de.tobiga.yougattme.bridge.canonicalFieldRoute
 import de.tobiga.yougattme.bridge.ControlRoute
 import de.tobiga.yougattme.bridge.DecodedMeasurement
 import de.tobiga.yougattme.bridge.DerivedMetricsEngine
@@ -55,6 +57,8 @@ import de.tobiga.yougattme.bridge.SourceEndpoint
 import de.tobiga.yougattme.bridge.StandardBleUuids
 import de.tobiga.yougattme.bridge.StandardInputAdapterProvider
 import de.tobiga.yougattme.bridge.StandardService
+import de.tobiga.yougattme.bridge.persistedCapabilityRoute
+import de.tobiga.yougattme.bridge.persistedValue
 import de.tobiga.yougattme.gatt.fitnessmachine.FtmsSupportedRanges
 import de.tobiga.yougattme.gatt.provider.BridgeOutputDefinition
 import de.tobiga.yougattme.gatt.provider.GattProfileProviderLoader
@@ -78,6 +82,7 @@ class BleBridgeService : Service() {
     private val reconnectAttempts = mutableMapOf<String, Int>()
     private val reconnectRunnables = mutableMapOf<String, Runnable>()
     private val discovered = mutableMapOf<String, BluetoothDevice>()
+    private val advertisements = mutableMapOf<String, InputAdvertisement>()
     private val capabilities = mutableMapOf<String, EndpointCapabilities>()
     private val controlRouteGenerations = mutableMapOf<String, Long>()
     private lateinit var bluetoothManager: BluetoothManager
@@ -225,9 +230,26 @@ class BleBridgeService : Service() {
         updateNotification()
     }
 
+    fun setProtocolOverride(address: String, adapterId: String?) {
+        val key = "bridge.device.$address.protocol_override"
+        prefs.edit().apply {
+            if (adapterId == null) remove(key) else putString(key, adapterId)
+        }.apply()
+        val previous = bridge.devices.value.orEmpty()[address]
+        previous?.let {
+            bridge.updateDevice(it.copy(
+                protocolOverride = adapterId,
+                detail = if (adapterId == null) "Protocol selection set to automatic"
+                else "Protocol override set to $adapterId"
+            ))
+        }
+        sessions[address]?.restartResolution()
+    }
+
     fun setRoute(route: ServiceRoute) {
-        bridge.setRoute(route)
-        persistRoute(route)
+        val canonical = canonicalRoute(route)
+        bridge.setRoute(canonical)
+        persistRoute(canonical)
         resolveAndApplyRoutes()
     }
 
@@ -248,20 +270,37 @@ class BleBridgeService : Service() {
         }).apply()
     }
 
-    fun setCapabilityMode(outputKey: String, mode: CapabilityMode): Boolean {
-        if (mode == CapabilityMode.MIRROR_CONNECTED_SERVICE) {
-            val endpoint = (bridge.routes.value.orEmpty()[outputKey]?.defaultSource as? RouteSource.Endpoint)
-                ?.let { bridge.endpoint(it.endpointId) }
-            if (endpoint == null) return false
-            val genericMirror = providerOutputs.any { definition ->
-                definition.outputKey == outputKey && definition.supportsCapabilityMirroring &&
-                    definition.protocolId == endpoint.protocolId
+    fun setCapabilityRoute(outputKey: String, route: CapabilityRoute): Boolean {
+        if (route is CapabilityRoute.Mirror) {
+            val endpoint = bridge.endpoint(route.endpointId) ?: return false
+            val outputRoute = bridge.routes.value.orEmpty()[outputKey] ?: return false
+            if (endpoint.protocolId != outputRoute.outputProtocolId) return false
+            val providerDefinition = providerOutputs.firstOrNull { it.outputKey == outputKey }
+            if (providerDefinition != null) {
+                if (!providerDefinition.supportsCapabilityMirroring) return false
+            } else if (!mirrorCapabilities(outputKey, endpoint)) {
+                return false
             }
-            if (!genericMirror && !mirrorCapabilities(outputKey, endpoint)) return false
         }
-        bridge.setCapabilityMode(outputKey, mode)
-        prefs.edit().putString("bridge.capability.$outputKey", mode.name).apply()
+        bridge.setCapabilityRoute(outputKey, route)
+        prefs.edit().putString("bridge.capability.$outputKey", route.persistedValue()).apply()
         return true
+    }
+
+    @Deprecated("Use setCapabilityRoute with an explicit endpoint")
+    fun setCapabilityMode(outputKey: String, mode: CapabilityMode): Boolean {
+        val route = when (mode) {
+            CapabilityMode.SIMULATOR_CONFIGURATION -> CapabilityRoute.SimulatorConfiguration
+            CapabilityMode.MIRROR_CONNECTED_SERVICE -> {
+                val serviceRoute = bridge.routes.value.orEmpty()[outputKey] ?: return false
+                val endpointId = serviceRoute.fieldOverrides.values
+                    .filterIsInstance<RouteSource.Endpoint>().firstOrNull()?.endpointId
+                    ?: (serviceRoute.defaultSource as? RouteSource.Endpoint)?.endpointId
+                    ?: return false
+                CapabilityRoute.Mirror(endpointId)
+            }
+        }
+        return setCapabilityRoute(outputKey, route)
     }
 
     private fun mirrorCapabilities(outputKey: String, endpoint: SourceEndpoint): Boolean {
@@ -448,7 +487,7 @@ class BleBridgeService : Service() {
         completion: (ControlResult) -> Unit
     ) {
         val session = sessions[endpoint.deviceAddress]
-        val adapter = inputAdapters.adapterForProtocol(endpoint.protocolId)
+        val adapter = session?.inputSession(endpoint.id)
             ?: run {
                 completion(ControlResult(ControlStatus.UNSUPPORTED))
                 return
@@ -467,7 +506,9 @@ class BleBridgeService : Service() {
             if (transaction.delayBeforeMillis > 0L) {
                 session.queue.enqueue(GattOperation.Delay(transaction.delayBeforeMillis))
             }
-            val characteristic = session.findCharacteristic(transaction.characteristicUuid)
+            val characteristic = transaction.serviceUuid?.let { serviceUuid ->
+                session.findCharacteristic(GattCharacteristicRef(serviceUuid, transaction.characteristicUuid))
+            } ?: session.findCharacteristic(transaction.characteristicUuid)
             if (characteristic == null) {
                 completion(ControlResult(ControlStatus.UNSUPPORTED))
                 return
@@ -524,28 +565,47 @@ class BleBridgeService : Service() {
 
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
-            val advertisedUuids = result.scanRecord?.serviceUuids.orEmpty().map { it.uuid }.toSet()
+            val record = result.scanRecord
+            val advertisedUuids = record?.serviceUuids.orEmpty().map { it.uuid }.toSet()
+            val manufacturerData = buildMap {
+                val values = record?.manufacturerSpecificData
+                if (values != null) for (index in 0 until values.size()) {
+                    put(values.keyAt(index), values.valueAt(index).copyOf())
+                }
+            }
+            val advertisement = InputAdvertisement(
+                deviceAddress = result.device.address,
+                deviceName = record?.deviceName,
+                serviceUuids = advertisedUuids,
+                manufacturerData = manufacturerData,
+                serviceData = record?.serviceData.orEmpty().mapKeys { it.key.uuid }
+                    .mapValues { it.value.copyOf() }
+            )
             val advertised = advertisedUuids.mapNotNull { uuid ->
                 StandardService.fromUuid(uuid)
             }.toSet()
-            if (!showAllDevices && !inputAdapters.matchesAdvertisement(advertisedUuids)) return
+            if (!showAllDevices && !inputAdapters.matchesAdvertisement(advertisement)) return
             val device = result.device
             discovered[device.address] = device
+            advertisements[device.address] = advertisement
             val existing = bridge.devices.value.orEmpty()[device.address]
             bridge.updateDevice(
                 InputDeviceState(
-                    identity = DeviceIdentity(device.address, result.scanRecord?.deviceName ?: existing?.identity?.name),
+                    identity = DeviceIdentity(device.address, record?.deviceName ?: existing?.identity?.name),
                     rssi = result.rssi,
                     status = existing?.status?.takeUnless { it == InputConnectionStatus.ERROR } ?: InputConnectionStatus.DISCOVERED,
                     advertisedServices = advertised,
                     endpoints = existing?.endpoints.orEmpty(),
-                    detail = existing?.detail
+                    detail = existing?.detail,
+                    protocolCandidates = existing?.protocolCandidates.orEmpty(),
+                    resolvedAdapterIds = existing?.resolvedAdapterIds.orEmpty(),
+                    protocolOverride = prefs.getString("bridge.device.${device.address}.protocol_override", null)
                 )
             )
             prefs.edit()
                 .putStringSet(PREF_KNOWN_DEVICES,
                     prefs.getStringSet(PREF_KNOWN_DEVICES, emptySet()).orEmpty() + device.address)
-                .putString("bridge.device.${device.address}.name", result.scanRecord?.deviceName ?: existing?.identity?.name)
+                .putString("bridge.device.${device.address}.name", record?.deviceName ?: existing?.identity?.name)
                 .apply()
         }
 
@@ -568,11 +628,18 @@ class BleBridgeService : Service() {
         var isOpen = false
         private var userInitiatedClose = false
         private val endpointIds = mutableSetOf<String>()
-        private val servicesWithValidMeasurements = mutableSetOf<UUID>()
-        private val awaitingMeasurementServices = mutableSetOf<UUID>()
+        private val endpointsWithValidMeasurements = mutableSetOf<String>()
+        private val awaitingMeasurementEndpoints = mutableSetOf<String>()
         private var initializedEndpoints: List<SourceEndpoint> = emptyList()
-        private val capabilityBytes = mutableMapOf<Pair<UUID, UUID>, ByteArray>()
-        private val failedSubscriptions = mutableSetOf<Pair<UUID, UUID>>()
+        private val capabilityBytes = mutableMapOf<GattCharacteristicRef, ByteArray>()
+        private val failedSubscriptions = mutableSetOf<GattCharacteristicRef>()
+        private val inputSessions = mutableListOf<InputAdapterSession>()
+        private val endpointSessionById = mutableMapOf<String, InputAdapterSession>()
+        private val endpointByCharacteristic = mutableMapOf<GattCharacteristicRef, SourceEndpoint>()
+        private val probeNotifications = mutableListOf<InputProbeNotification>()
+        private val subscribedCharacteristics = mutableSetOf<GattCharacteristicRef>()
+        private val pollingRunnables = mutableListOf<Runnable>()
+        private var resolvingAdapters = false
 
         fun connect() {
             userInitiatedClose = false
@@ -587,6 +654,10 @@ class BleBridgeService : Service() {
             userInitiatedClose = userInitiated
             isOpen = false
             queue.clear()
+            pollingRunnables.forEach(handler::removeCallbacks)
+            pollingRunnables.clear()
+            inputSessions.forEach(InputAdapterSession::close)
+            inputSessions.clear()
             endpointIds.forEach { bridge.invalidateEndpoint(it); derived.clear(it) }
             runCatching { gatt?.disconnect() }
             runCatching { gatt?.close() }
@@ -595,6 +666,29 @@ class BleBridgeService : Service() {
 
         fun findCharacteristic(uuid: UUID): BluetoothGattCharacteristic? =
             gatt?.services?.asSequence()?.mapNotNull { it.getCharacteristic(uuid) }?.firstOrNull()
+
+        fun findCharacteristic(reference: GattCharacteristicRef): BluetoothGattCharacteristic? =
+            gatt?.getService(reference.serviceUuid)?.getCharacteristic(reference.characteristicUuid)
+
+        fun inputSession(endpointId: String): InputAdapterSession? = endpointSessionById[endpointId]
+
+        fun restartResolution() {
+            if (!isOpen || gatt == null) return
+            queue.clear()
+            pollingRunnables.forEach(handler::removeCallbacks)
+            pollingRunnables.clear()
+            inputSessions.forEach(InputAdapterSession::close)
+            inputSessions.clear()
+            endpointSessionById.clear()
+            endpointByCharacteristic.clear()
+            endpointIds.forEach { bridge.invalidateEndpoint(it); derived.clear(it) }
+            endpointIds.clear()
+            capabilityBytes.clear()
+            failedSubscriptions.clear()
+            probeNotifications.clear()
+            subscribedCharacteristics.clear()
+            initializeServices()
+        }
 
         private val callback = object : BluetoothGattCallback() {
             override fun onConnectionStateChange(callbackGatt: BluetoothGatt, status: Int, newState: Int) {
@@ -657,146 +751,310 @@ class BleBridgeService : Service() {
         }
 
         private fun initializeServices() {
-            updateStatus(InputConnectionStatus.INITIALIZING, "Reading capabilities and subscribing")
-            val services = gatt?.services.orEmpty().filter { inputAdapters.adapterFor(it.uuid) != null }
-            services.forEach { service ->
-                val adapter = inputAdapters.adapterFor(service.uuid) ?: return@forEach
-                service.characteristics.forEach { characteristic ->
-                    when (characteristic.uuid) {
-                        in adapter.readableCapabilityCharacteristics ->
-                            if (characteristic.properties and BluetoothGattCharacteristic.PROPERTY_READ != 0) {
-                                queue.enqueue(GattOperation.Read(characteristic) { success, value ->
-                                    if (success && value != null) {
-                                        capabilityBytes[service.uuid to characteristic.uuid] = value.copyOf()
-                                    }
-                                })
-                            }
-                        in adapter.measurementCharacteristics,
-                        in adapter.statusCharacteristics -> subscribe(service.uuid, characteristic, indications = false)
-                        in adapter.controlPointCharacteristics -> {
-                            if (characteristic.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0) {
-                                subscribe(service.uuid, characteristic, indications = true)
-                            } else if (characteristic.properties and (
-                                    BluetoothGattCharacteristic.PROPERTY_WRITE or
-                                        BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE
-                                    ) == 0
-                            ) {
-                                failedSubscriptions += service.uuid to characteristic.uuid
-                            }
-                        }
-                    }
-                }
-                adapter.initializationTransactions(service.uuid).forEach { transaction ->
-                    enqueueAdapterTransaction(transaction, adapter.serviceName(service.uuid))
-                }
-            }
-            queue.enqueue(GattOperation.Barrier { success, _ -> if (success) markReady(services) })
-        }
-
-        private fun subscribe(serviceUuid: UUID, characteristic: BluetoothGattCharacteristic, indications: Boolean) {
-            val supported = if (indications) characteristic.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0
-            else characteristic.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0
-            if (!supported) {
-                failedSubscriptions += serviceUuid to characteristic.uuid
+            resolvingAdapters = true
+            updateStatus(InputConnectionStatus.INITIALIZING, "Resolving input protocol")
+            val discovery = discoveredInputDevice()
+            val candidates = inputAdapters.candidates(discovery)
+            if (candidates.isEmpty()) {
+                resolvingAdapters = false
+                updateStatus(InputConnectionStatus.ERROR, "No installed input adapter matches the discovered GATT table")
                 return
             }
-            queue.enqueue(GattOperation.Subscribe(characteristic, indications) { success, _ ->
-                if (!success) {
-                    failedSubscriptions += serviceUuid to characteristic.uuid
-                    bridge.addLog("GATT", "Subscription failed: ${characteristic.uuid}")
+            val plans = candidates.associate { (adapter, _) -> adapter to adapter.probePlan(discovery) }
+            plans.values.flatMap(InputProbePlan::subscribeCharacteristics).distinct().forEach { reference ->
+                findCharacteristic(reference)?.let { subscribe(reference, it) }
+            }
+            plans.values.flatMap(InputProbePlan::readCharacteristics).distinct().forEach { reference ->
+                val characteristic = findCharacteristic(reference) ?: return@forEach
+                if (characteristic.properties and BluetoothGattCharacteristic.PROPERTY_READ == 0) return@forEach
+                queue.enqueue(GattOperation.Read(characteristic) { success, value ->
+                    if (success && value != null) capabilityBytes[reference] = value.copyOf()
+                })
+            }
+            plans.forEach { (adapter, plan) ->
+                if (plan.transactions.isNotEmpty()) {
+                    bridge.addLog(
+                        "GATT",
+                        "Ignored unsafe legacy active probe from ${adapter.displayName}; declare an identity, status, or no-op probe"
+                    )
+                }
+                plan.safeTransactions.forEach { safeProbe ->
+                    enqueueAdapterTransaction(
+                        safeProbe.transaction,
+                        "${adapter.displayName} ${safeProbe.purpose.name.lowercase()} probe"
+                    )
+                }
+            }
+            queue.enqueue(GattOperation.Barrier { success, _ ->
+                if (success) resolveAndInitialize(discovery, candidates.map { it.first })
+                else {
+                    resolvingAdapters = false
+                    updateStatus(InputConnectionStatus.ERROR, "Input protocol probe failed")
                 }
             })
         }
 
-        private fun markReady(services: List<BluetoothGattService>) {
-            val endpointServices = mutableMapOf<String, BluetoothGattService>()
-            val endpoints = services.flatMap { service ->
-                val adapter = inputAdapters.adapterFor(service.uuid) ?: return@flatMap emptyList()
-                val waitingForMeasurement = adapter.requiresFirstMeasurementBeforeReady &&
-                    service.uuid !in servicesWithValidMeasurements
-                if (waitingForMeasurement) awaitingMeasurementServices += service.uuid
-                val standard = StandardService.fromUuid(service.uuid)
-                val control = service.characteristics.firstOrNull {
-                    it.uuid in adapter.controlPointCharacteristics &&
-                        (service.uuid to it.uuid) !in failedSubscriptions
-                }?.uuid
-                service.characteristics.filter {
-                    it.uuid in adapter.measurementCharacteristics &&
-                        (service.uuid to it.uuid) !in failedSubscriptions
-                }.map { measurement ->
-                    val id = endpointId(device.address, service.uuid, measurement.uuid)
-                    val serviceCapabilityValues = capabilityBytes.filterKeys { it.first == service.uuid }
-                        .mapKeys { it.key.second }
-                    endpointIds += id
-                    endpointServices[id] = service
-                    SourceEndpoint(
-                        id, device.address, knownName ?: bridge.devices.value.orEmpty()[device.address]?.identity?.name,
-                        standard, measurement.uuid, adapter.supportedMetrics(measurement.uuid), control,
-                        initialized = !waitingForMeasurement, serviceName = adapter.serviceName(service.uuid),
-                        protocolId = adapter.protocolId(service.uuid),
-                        controlCapabilities = adapter.controlCapabilities(service.uuid, serviceCapabilityValues),
-                        settingsActivityClassName = adapter.settingsActivityClassName,
-                        serviceUuid = service.uuid,
-                        capabilityValues = serviceCapabilityValues
+        private fun discoveredInputDevice(): InputDeviceDiscovery {
+            val services = gatt?.services.orEmpty().associate { service ->
+                service.uuid to InputGattService(
+                    service.uuid,
+                    service.characteristics.associate { characteristic ->
+                        val properties = characteristic.properties
+                        characteristic.uuid to InputGattCharacteristic(
+                            uuid = characteristic.uuid,
+                            readable = properties and BluetoothGattCharacteristic.PROPERTY_READ != 0,
+                            writable = properties and BluetoothGattCharacteristic.PROPERTY_WRITE != 0,
+                            writableWithoutResponse =
+                                properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0,
+                            notifiable = properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0,
+                            indicatable = properties and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0
+                        )
+                    }
+                )
+            }
+            val advertisement = advertisements[device.address] ?: InputAdvertisement(
+                device.address,
+                knownName ?: bridge.devices.value.orEmpty()[device.address]?.identity?.name,
+                services.keys
+            )
+            return InputDeviceDiscovery(advertisement, services)
+        }
+
+        private fun resolveAndInitialize(
+            discovery: InputDeviceDiscovery,
+            candidates: List<InputAdapter>
+        ) {
+            val probeResult = InputProbeResult(
+                readValues = capabilityBytes.mapValues { it.value.copyOf() },
+                notifications = probeNotifications.map { it.copy(value = it.value.copyOf()) }
+            )
+            val evaluated = candidates.mapNotNull { adapter ->
+                val match = adapter.evaluateProbe(discovery, probeResult)
+                adapter.takeIf { match.confidence != InputMatchConfidence.NONE }?.let { it to match }
+            }
+            val override = prefs.getString("bridge.device.${device.address}.protocol_override", null)
+            val selection = selectInputAdapters(discovery.services.keys, evaluated, override)
+            val selected = when (selection) {
+                is InputAdapterSelection.Selected -> selection.adapters
+                is InputAdapterSelection.Ambiguous -> {
+                    resolvingAdapters = false
+                    val options = selection.adapters
+                        .map { InputProtocolOption(it.adapterId, it.displayName) }
+                        .sortedBy(InputProtocolOption::displayName)
+                    bridge.updateDevice(InputDeviceState(
+                        identity = DeviceIdentity(device.address, discovery.deviceName ?: knownName),
+                        rssi = bridge.devices.value.orEmpty()[device.address]?.rssi,
+                        status = InputConnectionStatus.PROTOCOL_SELECTION_REQUIRED,
+                        advertisedServices = discovery.services.keys.mapNotNull(StandardService::fromUuid).toSet(),
+                        detail = "Several protocols match this GATT transport; choose one or keep Auto after adding a stronger fingerprint",
+                        protocolCandidates = options,
+                        protocolOverride = override
+                    ))
+                    bridge.addLog("GATT", "Protocol selection required: ${options.joinToString { it.displayName }}")
+                    updateNotification()
+                    return
+                }
+                is InputAdapterSelection.IncompatibleOverride -> {
+                    resolvingAdapters = false
+                    updateStatus(
+                        InputConnectionStatus.ERROR,
+                        "Saved protocol ${selection.adapterId} is not compatible with this device; choose Auto or another protocol"
                     )
+                    return
+                }
+                InputAdapterSelection.NoMatch -> {
+                    resolvingAdapters = false
+                    updateStatus(InputConnectionStatus.ERROR, "Matching adapters rejected the protocol probe")
+                    return
+                }
+            }
+            inputSessions.clear()
+            inputSessions += selected.mapNotNull { adapter ->
+                adapter.openSession(discovery, probeResult)
+            }
+            if (inputSessions.isEmpty()) {
+                resolvingAdapters = false
+                updateStatus(InputConnectionStatus.ERROR, "Matching adapters rejected the protocol probe")
+                return
+            }
+            updateStatus(InputConnectionStatus.INITIALIZING, "Reading capabilities and subscribing")
+            inputSessions.flatMap { it.readableCharacteristics }.distinct().forEach { reference ->
+                if (reference in capabilityBytes) return@forEach
+                val characteristic = findCharacteristic(reference) ?: return@forEach
+                if (characteristic.properties and BluetoothGattCharacteristic.PROPERTY_READ == 0) return@forEach
+                queue.enqueue(GattOperation.Read(characteristic) { success, value ->
+                    if (success && value != null) capabilityBytes[reference] = value.copyOf()
+                })
+            }
+            inputSessions.flatMap { it.subscriptionCharacteristics }.distinct().forEach { reference ->
+                findCharacteristic(reference)?.let { subscribe(reference, it) }
+            }
+            inputSessions.forEach { session ->
+                session.initializationTransactions().forEach { transaction ->
+                    enqueueAdapterTransaction(transaction, session.displayName)
+                }
+            }
+            queue.enqueue(GattOperation.Barrier { success, _ ->
+                resolvingAdapters = false
+                if (success) markReady(discovery) else updateStatus(InputConnectionStatus.ERROR, "Adapter initialization failed")
+            })
+        }
+
+        private fun subscribe(reference: GattCharacteristicRef, characteristic: BluetoothGattCharacteristic) {
+            if (reference in subscribedCharacteristics) return
+            val notifiable = characteristic.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0
+            val indicatable = characteristic.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0
+            if (!notifiable && !indicatable) {
+                val writable = characteristic.properties and (
+                    BluetoothGattCharacteristic.PROPERTY_WRITE or
+                        BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE
+                    ) != 0
+                if (!writable) failedSubscriptions += reference
+                return
+            }
+            queue.enqueue(GattOperation.Subscribe(characteristic, indications = !notifiable && indicatable) { success, _ ->
+                if (!success) {
+                    failedSubscriptions += reference
+                    bridge.addLog("GATT", "Subscription failed: ${characteristic.uuid}")
+                } else {
+                    subscribedCharacteristics += reference
+                }
+            })
+        }
+
+        private fun markReady(discovery: InputDeviceDiscovery) {
+            endpointSessionById.clear()
+            endpointByCharacteristic.clear()
+            awaitingMeasurementEndpoints.clear()
+            val endpoints = inputSessions.flatMap { session ->
+                session.endpointDefinitions(capabilityBytes).mapNotNull { definition ->
+                    if (definition.primaryMeasurement in failedSubscriptions ||
+                        findCharacteristic(definition.primaryMeasurement) == null) return@mapNotNull null
+                    val legacyKey =
+                        "${definition.primaryMeasurement.serviceUuid}|${definition.primaryMeasurement.characteristicUuid}"
+                    val id = if (definition.key == legacyKey && definition.measurementCharacteristics.size == 1) {
+                        endpointId(
+                            device.address,
+                            definition.primaryMeasurement.serviceUuid,
+                            definition.primaryMeasurement.characteristicUuid
+                        )
+                    } else {
+                        "${device.address}|${session.adapterId}|${definition.key}"
+                    }
+                    val waitingForMeasurement = definition.requiresFirstMeasurementBeforeReady &&
+                        id !in endpointsWithValidMeasurements
+                    if (waitingForMeasurement) awaitingMeasurementEndpoints += id
+                    val serviceCapabilityValues = capabilityBytes
+                        .filterKeys { it.serviceUuid == definition.primaryMeasurement.serviceUuid }
+                        .mapKeys { it.key.characteristicUuid }
+                    val control = definition.controlPoint
+                        ?.takeUnless { it in failedSubscriptions || findCharacteristic(it) == null }
+                    val endpoint = SourceEndpoint(
+                        id = id,
+                        deviceAddress = device.address,
+                        deviceName = discovery.deviceName ?: knownName,
+                        service = StandardService.fromUuid(definition.primaryMeasurement.serviceUuid),
+                        measurementCharacteristic = definition.primaryMeasurement.characteristicUuid,
+                        supportedMetrics = definition.supportedMetrics,
+                        controlPointCharacteristic = control?.characteristicUuid,
+                        initialized = !waitingForMeasurement,
+                        serviceName = definition.serviceName,
+                        protocolId = definition.protocolId,
+                        controlCapabilities = definition.controlCapabilities,
+                        settingsActivityClassName = definition.settingsActivityClassName,
+                        serviceUuid = definition.primaryMeasurement.serviceUuid,
+                        capabilityValues = serviceCapabilityValues,
+                        measurementCharacteristics = definition.measurementCharacteristics
+                    )
+                    endpointIds += id
+                    endpointSessionById[id] = session
+                    definition.measurementCharacteristics.forEach { endpointByCharacteristic[it] = endpoint }
+                    endpoint
                 }
             }
             initializedEndpoints = endpoints
             endpoints.forEach { endpoint ->
-                val endpointService = endpointServices.getValue(endpoint.id)
-                val serviceCapabilities = capabilityBytes.filterKeys { (serviceUuid, _) ->
-                    serviceUuid == endpointService.uuid
-                }
+                val serviceUuid = endpoint.serviceUuid ?: return@forEach
+                val endpointService = gatt?.getService(serviceUuid) ?: return@forEach
+                val serviceCapabilities = capabilityBytes.filterKeys { it.serviceUuid == serviceUuid }
                 capabilities[endpoint.id] = EndpointCapabilities(
                     featureBytes = endpoint.service?.let {
-                        serviceCapabilities[endpointService.uuid to featureUuid(it)]?.copyOf()
+                        serviceCapabilities[GattCharacteristicRef(serviceUuid, featureUuid(it))]?.copyOf()
                     },
-                    ranges = serviceCapabilities.filterKeys { (_, characteristicUuid) -> characteristicUuid in setOf(
+                    ranges = serviceCapabilities.filterKeys { it.characteristicUuid in setOf(
                         StandardBleUuids.FTMS_SUPPORTED_SPEED_RANGE, StandardBleUuids.FTMS_SUPPORTED_INCLINATION_RANGE,
                         StandardBleUuids.FTMS_SUPPORTED_RESISTANCE_RANGE, StandardBleUuids.FTMS_SUPPORTED_HEART_RATE_RANGE,
                         StandardBleUuids.FTMS_SUPPORTED_POWER_RANGE
-                    ) }.mapKeys { it.key.second },
-                    sensorLocation = serviceCapabilities[endpointService.uuid to StandardBleUuids.CPS_SENSOR_LOCATION]
+                    ) }.mapKeys { it.key.characteristicUuid },
+                    sensorLocation = serviceCapabilities[GattCharacteristicRef(serviceUuid, StandardBleUuids.CPS_SENSOR_LOCATION)]
                         ?.firstOrNull()?.toInt()?.and(0xFF),
-                    bodySensorLocation = serviceCapabilities[endpointService.uuid to StandardBleUuids.BODY_SENSOR_LOCATION]
+                    bodySensorLocation = serviceCapabilities[GattCharacteristicRef(serviceUuid, StandardBleUuids.BODY_SENSOR_LOCATION)]
                         ?.firstOrNull()?.toInt()?.and(0xFF),
                     characteristicUuids = endpointService.characteristics.map { it.uuid }.toSet()
                 )
             }
-            val advertised = services.mapNotNull { StandardService.fromUuid(it.uuid) }.toSet()
+            val advertised = discovery.services.keys.mapNotNull(StandardService::fromUuid).toSet()
+            val candidates = inputAdapters.candidates(discovery).map { (adapter, _) ->
+                InputProtocolOption(adapter.adapterId, adapter.displayName)
+            }.distinctBy(InputProtocolOption::adapterId).sortedBy(InputProtocolOption::displayName)
+            val ready = awaitingMeasurementEndpoints.isEmpty()
             bridge.updateDevice(InputDeviceState(
-                DeviceIdentity(device.address, knownName),
+                DeviceIdentity(device.address, discovery.deviceName ?: knownName),
                 bridge.devices.value.orEmpty()[device.address]?.rssi,
-                if (awaitingMeasurementServices.isEmpty()) InputConnectionStatus.READY else InputConnectionStatus.INITIALIZING,
+                if (ready) InputConnectionStatus.READY else InputConnectionStatus.INITIALIZING,
                 advertised, endpoints,
-                if (awaitingMeasurementServices.isEmpty()) {
+                if (ready) {
                     "${endpoints.size} measurement endpoint${if (endpoints.size == 1) "" else "s"} ready"
-                } else "Waiting for the first valid trainer measurement"
+                } else "Waiting for the first valid trainer measurement",
+                protocolCandidates = candidates,
+                resolvedAdapterIds = inputSessions.mapTo(linkedSetOf(), InputAdapterSession::adapterId),
+                protocolOverride = prefs.getString("bridge.device.${device.address}.protocol_override", null)
             ))
             bridge.addLog("GATT", "${knownName ?: device.address} initialized (${endpoints.size} endpoints)")
+            inputSessions.forEach(::schedulePolling)
             updateNotification()
+        }
+
+        private fun schedulePolling(session: InputAdapterSession) {
+            val interval = session.pollingIntervalMillis?.takeIf { it >= 50L } ?: return
+            lateinit var runnable: Runnable
+            runnable = Runnable {
+                if (!isOpen || session !in inputSessions) return@Runnable
+                session.pollTransactions().forEach { transaction ->
+                    enqueueAdapterTransaction(transaction, "${session.displayName} poll")
+                }
+                queue.enqueue(GattOperation.Barrier { _, _ ->
+                    if (isOpen && session in inputSessions) handler.postDelayed(runnable, interval)
+                })
+            }
+            pollingRunnables += runnable
+            handler.postDelayed(runnable, interval)
         }
 
         private fun handleChanged(characteristic: BluetoothGattCharacteristic, value: ByteArray) {
             queue.onCharacteristicChanged(characteristic, value)
             val service = characteristic.service ?: return
-            val endpointId = endpointId(device.address, service.uuid, characteristic.uuid)
-            val adapter = inputAdapters.adapterFor(service.uuid) ?: return
-            if (characteristic.uuid in adapter.measurementCharacteristics) {
-                val decoded = adapter.decode(endpointId, characteristic.uuid, value, System.currentTimeMillis())
+            val reference = GattCharacteristicRef(service.uuid, characteristic.uuid)
+            if (resolvingAdapters) {
+                probeNotifications += InputProbeNotification(reference, value.copyOf())
+            }
+            val endpoint = endpointByCharacteristic[reference]
+            val inputSession = endpoint?.let { endpointSessionById[it.id] }
+            if (endpoint != null && inputSession != null) {
+                val decoded = inputSession.decode(endpoint.id, reference, value, System.currentTimeMillis())
                 if (decoded == null) {
                     bridge.addLog("UPSTREAM RX", "Rejected malformed ${characteristic.uuid}", value)
                     return
                 }
-                val normalized = derived.addDerived(endpointId, decoded)
-                if (adapter.qualifiesAsReadyMeasurement(normalized)) {
-                    servicesWithValidMeasurements += service.uuid
-                    if (awaitingMeasurementServices.remove(service.uuid)) promoteInitializedService(service.uuid)
+                val normalized = derived.addDerived(endpoint.id, decoded)
+                if (inputSession.qualifiesAsReadyMeasurement(normalized)) {
+                    endpointsWithValidMeasurements += endpoint.id
+                    if (awaitingMeasurementEndpoints.remove(endpoint.id)) promoteInitializedEndpoint(endpoint.id)
                 }
-                bridge.addLog("UPSTREAM RX", "${adapter.serviceName(service.uuid)} ${characteristic.uuid}", value)
-                bridge.accept(endpointId, normalized)
-                adapter.followUpTransactions(endpointId, normalized).forEach { transaction ->
-                    enqueueAdapterTransaction(transaction, adapter.serviceName(service.uuid))
+                bridge.addLog("UPSTREAM RX", "${endpoint.serviceName} ${characteristic.uuid}", value)
+                bridge.accept(endpoint.id, normalized)
+                inputSession.followUpTransactions(endpoint.id, normalized).forEach { transaction ->
+                    enqueueAdapterTransaction(transaction, endpoint.serviceName)
                 }
                 val decodedSummary = normalized.metrics.entries.joinToString { "${it.key.name}=${"%.2f".format(it.value)}" }
                     .ifBlank { normalized.protocolFields.entries.joinToString { "${it.key}=${it.value}" } }
@@ -809,7 +1067,9 @@ class BleBridgeService : Service() {
 
         private fun enqueueAdapterTransaction(transaction: AdapterTransaction, label: String) {
             if (transaction.delayBeforeMillis > 0L) queue.enqueue(GattOperation.Delay(transaction.delayBeforeMillis))
-            val target = findCharacteristic(transaction.characteristicUuid)
+            val target = transaction.serviceUuid?.let { serviceUuid ->
+                findCharacteristic(GattCharacteristicRef(serviceUuid, transaction.characteristicUuid))
+            } ?: findCharacteristic(transaction.characteristicUuid)
             if (target == null) {
                 bridge.addLog("GATT", "Provider transaction characteristic missing: ${transaction.characteristicUuid}")
                 return
@@ -828,15 +1088,18 @@ class BleBridgeService : Service() {
             })
         }
 
-        private fun promoteInitializedService(serviceUuid: UUID) {
+        private fun promoteInitializedEndpoint(endpointId: String) {
             initializedEndpoints = initializedEndpoints.map { endpoint ->
-                if (endpoint.serviceUuid == serviceUuid) endpoint.copy(initialized = true) else endpoint
+                if (endpoint.id == endpointId) endpoint.copy(initialized = true) else endpoint
+            }
+            initializedEndpoints.firstOrNull { it.id == endpointId }?.let { promoted ->
+                promoted.measurementCharacteristics.forEach { endpointByCharacteristic[it] = promoted }
             }
             val previous = bridge.devices.value.orEmpty()[device.address] ?: return
             bridge.updateDevice(previous.copy(
-                status = if (awaitingMeasurementServices.isEmpty()) InputConnectionStatus.READY else InputConnectionStatus.INITIALIZING,
+                status = if (awaitingMeasurementEndpoints.isEmpty()) InputConnectionStatus.READY else InputConnectionStatus.INITIALIZING,
                 endpoints = initializedEndpoints,
-                detail = if (awaitingMeasurementServices.isEmpty()) {
+                detail = if (awaitingMeasurementEndpoints.isEmpty()) {
                     "${initializedEndpoints.size} measurement endpoint${if (initializedEndpoints.size == 1) "" else "s"} ready"
                 } else "Waiting for the first valid trainer measurement"
             ))
@@ -852,6 +1115,10 @@ class BleBridgeService : Service() {
             val shouldReconnect = !userInitiatedClose && bridge.serviceRunning.value == true
             isOpen = false
             queue.clear()
+            pollingRunnables.forEach(handler::removeCallbacks)
+            pollingRunnables.clear()
+            inputSessions.forEach(InputAdapterSession::close)
+            inputSessions.clear()
             runCatching { gatt?.close() }
             gatt = null
             endpointIds.forEach { bridge.invalidateEndpoint(it); derived.clear(it) }
@@ -862,9 +1129,11 @@ class BleBridgeService : Service() {
 
         private fun updateStatus(status: InputConnectionStatus, detail: String) {
             val previous = bridge.devices.value.orEmpty()[device.address]
-            bridge.updateDevice(InputDeviceState(
-                DeviceIdentity(device.address, knownName ?: previous?.identity?.name),
-                previous?.rssi, status, previous?.advertisedServices.orEmpty(), previous?.endpoints.orEmpty(), detail
+            bridge.updateDevice(previous?.copy(status = status, detail = detail) ?: InputDeviceState(
+                DeviceIdentity(device.address, knownName),
+                status = status,
+                detail = detail,
+                protocolOverride = prefs.getString("bridge.device.${device.address}.protocol_override", null)
             ))
             updateNotification()
         }
@@ -889,7 +1158,7 @@ class BleBridgeService : Service() {
         val samples = bridge.samples.value.orEmpty()
         val now = System.currentTimeMillis()
         bridge.routes.value.orEmpty().values.forEach { route ->
-            val resolved = routing.resolve(route, requiredMetrics(route.outputKey), samples, now)
+            val resolved = routing.resolve(route, activeMetrics(route.outputKey), samples, now)
             bridge.setResolved(resolved)
             if (resolved.freshness == RouteFreshness.FRESH) {
                 applyValues(route.outputKey, resolved.values.mapValues { it.value.value })
@@ -978,7 +1247,7 @@ class BleBridgeService : Service() {
         }
     }
 
-    private fun requiredMetrics(outputKey: String): Set<Metric> = when (outputKey) {
+    private fun activeMetrics(outputKey: String): Set<Metric> = when (outputKey) {
         "csc" -> buildSet {
             if (state.cscConfiguration.includeWheelRevolutionData) add(Metric.SPEED_MPS)
             if (state.cscConfiguration.includeCrankRevolutionData) add(Metric.CADENCE_RPM)
@@ -1001,7 +1270,7 @@ class BleBridgeService : Service() {
             if (state.heartRateConfiguration.includeRrIntervals) add(Metric.RR_INTERVAL_SECONDS)
         }
         "ftms" -> ftmsRequiredMetrics()
-        else -> providerOutputs.firstOrNull { it.outputKey == outputKey }?.requiredMetrics.orEmpty()
+        else -> providerOutputs.firstOrNull { it.outputKey == outputKey }?.routableMetrics.orEmpty()
     }
 
     private fun ftmsRequiredMetrics(): Set<Metric> = when (state.selectedFitnessMachineMode.value) {
@@ -1058,7 +1327,9 @@ class BleBridgeService : Service() {
         ).forEach { (key, service) ->
             if (bridge.routes.value.orEmpty()[key] == null) bridge.setRoute(ServiceRoute(key, service))
             if (bridge.controlRoutes.value.orEmpty()[key] == null) bridge.setControlRoute(key, ControlRoute.LocalSimulator)
-            if (bridge.capabilityModes.value.orEmpty()[key] == null) bridge.setCapabilityMode(key, CapabilityMode.SIMULATOR_CONFIGURATION)
+            if (bridge.capabilityRoutes.value.orEmpty()[key] == null) {
+                bridge.setCapabilityRoute(key, CapabilityRoute.SimulatorConfiguration)
+            }
         }
         providerOutputs.forEach { definition ->
             if (bridge.routes.value.orEmpty()[definition.outputKey] == null) {
@@ -1071,17 +1342,43 @@ class BleBridgeService : Service() {
             if (bridge.controlRoutes.value.orEmpty()[definition.outputKey] == null) {
                 bridge.setControlRoute(definition.outputKey, ControlRoute.LocalSimulator)
             }
-            if (bridge.capabilityModes.value.orEmpty()[definition.outputKey] == null) {
-                bridge.setCapabilityMode(definition.outputKey, CapabilityMode.SIMULATOR_CONFIGURATION)
+            if (bridge.capabilityRoutes.value.orEmpty()[definition.outputKey] == null) {
+                bridge.setCapabilityRoute(definition.outputKey, CapabilityRoute.SimulatorConfiguration)
             }
         }
     }
 
+    private fun routableMetrics(outputKey: String): Set<Metric> = when (outputKey) {
+        "ftms" -> setOf(
+            Metric.SPEED_MPS, Metric.CADENCE_RPM, Metric.POWER_WATTS, Metric.HEART_RATE_BPM,
+            Metric.RESISTANCE_LEVEL, Metric.INCLINATION_PERCENT, Metric.STEP_RATE_PER_MINUTE,
+            Metric.STROKE_RATE_PER_MINUTE, Metric.METABOLIC_EQUIVALENT, Metric.MOVEMENT_DIRECTION
+        )
+        "cycling_power" -> setOf(
+            Metric.POWER_WATTS, Metric.SPEED_MPS, Metric.CADENCE_RPM,
+            Metric.PEDAL_POWER_BALANCE_PERCENT, Metric.ACCUMULATED_TORQUE_NM
+        )
+        "csc" -> setOf(Metric.SPEED_MPS, Metric.CADENCE_RPM)
+        "rsc" -> setOf(
+            Metric.SPEED_MPS, Metric.CADENCE_RPM, Metric.STRIDE_LENGTH_METERS,
+            Metric.WALKING_RUNNING_STATUS
+        )
+        "heart_rate" -> setOf(
+            Metric.HEART_RATE_BPM, Metric.HEART_RATE_ENERGY_KJ, Metric.RR_INTERVAL_SECONDS
+        )
+        else -> providerOutputs.firstOrNull { it.outputKey == outputKey }?.routableMetrics.orEmpty()
+    }
+
+    private fun canonicalRoute(route: ServiceRoute): ServiceRoute {
+        return route.canonicalFieldRoute(routableMetrics(route.outputKey))
+    }
+
     private fun persistRoute(route: ServiceRoute) {
         val json = JSONObject()
+            .put("schema", 2)
             .put("service", route.outputService?.name)
             .put("protocol", route.outputProtocolId)
-            .put("default", encodeSource(route.defaultSource))
+            .put("default", "manual")
         val fields = JSONObject()
         route.fieldOverrides.forEach { (metric, source) -> fields.put(metric.name, encodeSource(source)) }
         json.put("fields", fields)
@@ -1092,6 +1389,7 @@ class BleBridgeService : Service() {
         val keys = listOf("ftms", "cycling_power", "csc", "rsc", "heart_rate") +
             providerOutputs.map { it.outputKey }
         keys.distinct().forEach { key ->
+            var legacyMirrorEndpoint: String? = null
             prefs.getString("bridge.route.$key", null)?.let { encoded ->
                 runCatching {
                     val json = JSONObject(encoded)
@@ -1101,10 +1399,18 @@ class BleBridgeService : Service() {
                     }.toMap()
                     val standard = json.optString("service").takeIf { it.isNotBlank() && it != "null" }
                         ?.let { StandardService.valueOf(it) }
-                    bridge.setRoute(ServiceRoute(
-                        key, standard, decodeSource(json.getString("default")), fields,
+                    val defaultSource = decodeSource(json.optString("default", "manual"))
+                    legacyMirrorEndpoint = (defaultSource as? RouteSource.Endpoint)?.endpointId
+                    val restored = ServiceRoute(
+                        key, standard, defaultSource, fields,
                         json.optString("protocol", standard?.name ?: key)
-                    ))
+                    )
+                    val canonical = canonicalRoute(restored)
+                    bridge.setRoute(canonical)
+                    if (canonical != restored || json.optInt("schema", 1) < 2) {
+                        persistRoute(canonical)
+                        bridge.addLog("MIGRATION", "$key measurement routing converted to per-field sources")
+                    }
                 }
             }
             prefs.getString("bridge.control.$key", null)?.let { encoded ->
@@ -1112,7 +1418,13 @@ class BleBridgeService : Service() {
                 else ControlRoute.Remote(encoded.removePrefix("remote:")))
             }
             prefs.getString("bridge.capability.$key", null)?.let { encoded ->
-                runCatching { bridge.setCapabilityMode(key, CapabilityMode.valueOf(encoded)) }
+                val endpointId = legacyMirrorEndpoint
+                val capabilityRoute = persistedCapabilityRoute(encoded, endpointId)
+                if (encoded == CapabilityMode.MIRROR_CONNECTED_SERVICE.name && endpointId == null) {
+                    bridge.addLog("MIGRATION", "$key capability mirror had no source; using simulator configuration")
+                }
+                bridge.setCapabilityRoute(key, capabilityRoute)
+                prefs.edit().putString("bridge.capability.$key", capabilityRoute.persistedValue()).apply()
             }
         }
     }
@@ -1172,7 +1484,9 @@ class BleBridgeService : Service() {
         val stop = PendingIntent.getService(this, 1, Intent(this, BleBridgeService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val ready = bridge.devices.value.orEmpty().values.count { it.status == InputConnectionStatus.READY }
-        val routed = bridge.routes.value.orEmpty().values.count { it.defaultSource is RouteSource.Endpoint }
+        val routed = bridge.routes.value.orEmpty().values.count { route ->
+            route.fieldOverrides.values.any { it is RouteSource.Endpoint }
+        }
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_baseline_nfc)
             .setContentTitle("You GATT Me BLE bridge")

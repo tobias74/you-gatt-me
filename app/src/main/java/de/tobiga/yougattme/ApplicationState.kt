@@ -787,8 +787,8 @@ class ApplicationState private constructor(private val context: Context) {
 
     private fun isBridgeRouted(outputKey: String): Boolean {
         val route = mainViewModel.bridgeState.routes.value.orEmpty()[outputKey] ?: return false
-        return route.defaultSource is RouteSource.Endpoint ||
-            route.fieldOverrides.values.any { it is RouteSource.Endpoint }
+        return route.fieldOverrides.values.any { it is RouteSource.Endpoint } ||
+            route.defaultSource is RouteSource.Endpoint
     }
 
     private fun bridgeRouteIsFresh(outputKey: String): Boolean =

@@ -13,8 +13,7 @@ class RoutingEngine {
         val stale = linkedSetOf<Metric>()
 
         requiredMetrics.forEach { metric ->
-            val configured = route.fieldOverrides[metric] ?: RouteSource.Inherit
-            val source = if (configured == RouteSource.Inherit) route.defaultSource else configured
+            val source = route.sourceFor(metric)
             when (source) {
                 RouteSource.Manual, RouteSource.Inherit -> manual += metric
                 is RouteSource.Endpoint -> {

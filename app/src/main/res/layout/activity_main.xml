@@ -167,7 +167,7 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Input devices &amp; routing"
+                            android:text="Input devices"
                             android:textColor="@color/simulator_ink"
                             android:textSize="18sp"
                             android:textStyle="bold" />
@@ -242,39 +242,97 @@
                         android:layout_height="wrap_content"
                         android:orientation="vertical" />
 
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="18dp"
-                        android:fontFamily="sans-serif-condensed"
-                        android:letterSpacing="0.08"
-                        android:text="OUTPUT ROUTES"
-                        android:textColor="@color/simulator_moss"
-                        android:textSize="13sp"
-                        android:textStyle="bold" />
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="Each simulated service has an independent measurement source, field overrides and control destination."
-                        android:textColor="@color/simulator_ink_muted"
-                        android:textSize="12sp" />
-                    <LinearLayout
-                        android:id="@+id/layoutBridgeRoutes"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="vertical" />
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
 
-                    <TextView
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            app:cardBackgroundColor="@color/simulator_panel"
+            app:cardCornerRadius="22dp"
+            app:cardElevation="0dp"
+            app:strokeColor="@color/simulator_line"
+            app:strokeWidth="1dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:id="@+id/headerBridgeDiagnostics"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/simulator_accordion_item_closed"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:padding="18dp">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Diagnostics"
+                            android:textColor="@color/simulator_ink"
+                            android:textSize="18sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="3dp"
+                            android:text="Connection, decoding, routing and control log"
+                            android:textColor="@color/simulator_ink_muted"
+                            android:textSize="13sp" />
+                    </LinearLayout>
+
+                    <ImageView
+                        android:id="@+id/iconBridgeDiagnosticsExpand"
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:contentDescription="Expand diagnostics"
+                        android:src="@drawable/ic_accordion_chevron_right" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/contentBridgeDiagnostics"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/simulator_accordion_body"
+                    android:orientation="vertical"
+                    android:padding="18dp"
+                    android:visibility="gone">
+
+                    <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="18dp"
-                        android:fontFamily="sans-serif-condensed"
-                        android:letterSpacing="0.08"
-                        android:text="BRIDGE LOG"
-                        android:textColor="@color/simulator_moss"
-                        android:textSize="13sp"
-                        android:textStyle="bold" />
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <Spinner
+                            android:id="@+id/spinnerBridgeLogFilter"
+                            android:layout_width="0dp"
+                            android:layout_height="48dp"
+                            android:layout_weight="1" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/buttonClearBridgeLog"
+                            style="@style/Widget.MaterialComponents.Button.TextButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Clear"
+                            android:textAllCaps="false" />
+                    </LinearLayout>
+
                     <TextView
                         android:id="@+id/textBridgeLog"
                         android:layout_width="match_parent"

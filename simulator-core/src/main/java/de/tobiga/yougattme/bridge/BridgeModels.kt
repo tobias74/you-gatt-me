@@ -75,7 +75,9 @@ data class SourceEndpoint(
     val controlCapabilities: Set<ControlCommand.Kind> = emptySet(),
     val settingsActivityClassName: String? = null,
     val serviceUuid: UUID? = service?.serviceUuid,
-    val capabilityValues: Map<UUID, ByteArray> = emptyMap()
+    val capabilityValues: Map<UUID, ByteArray> = emptyMap(),
+    val measurementCharacteristics: Set<GattCharacteristicRef> =
+        serviceUuid?.let { setOf(GattCharacteristicRef(it, measurementCharacteristic)) }.orEmpty()
 ) {
     val label: String
         get() = "${deviceName?.takeIf(String::isNotBlank) ?: deviceAddress} · $serviceName"
@@ -97,6 +99,7 @@ data class MetricSample(
 
 sealed interface RouteSource {
     data object Manual : RouteSource
+    @Deprecated("Field routes are explicit; missing fields now mean Manual")
     data object Inherit : RouteSource
     data class Endpoint(val endpointId: String) : RouteSource
 }
@@ -104,16 +107,51 @@ sealed interface RouteSource {
 data class ServiceRoute(
     val outputKey: String,
     val outputService: StandardService?,
+    @Deprecated("Service-wide sources are retained only for persisted-route compatibility; use fieldOverrides")
     val defaultSource: RouteSource = RouteSource.Manual,
     val fieldOverrides: Map<Metric, RouteSource> = emptyMap(),
     val outputProtocolId: String = outputService?.name ?: outputKey
-)
+) {
+    /** Returns the effective source while old default/inherit routes are being migrated. */
+    fun sourceFor(metric: Metric): RouteSource = when (val configured = fieldOverrides[metric]) {
+        null, RouteSource.Inherit -> defaultSource.takeUnless { it == RouteSource.Inherit } ?: RouteSource.Manual
+        else -> configured
+    }
+}
+
+fun ServiceRoute.canonicalFieldRoute(routableMetrics: Set<Metric>): ServiceRoute {
+    val metrics = routableMetrics + fieldOverrides.keys
+    val fields = metrics.mapNotNull { metric ->
+        (sourceFor(metric) as? RouteSource.Endpoint)?.let { metric to it }
+    }.toMap()
+    return copy(defaultSource = RouteSource.Manual, fieldOverrides = fields)
+}
 
 sealed interface ControlRoute {
     data object LocalSimulator : ControlRoute
     data class Remote(val endpointId: String) : ControlRoute
 }
 
+sealed interface CapabilityRoute {
+    data object SimulatorConfiguration : CapabilityRoute
+    data class Mirror(val endpointId: String) : CapabilityRoute
+}
+
+fun CapabilityRoute.persistedValue(): String = when (this) {
+    CapabilityRoute.SimulatorConfiguration -> "simulator"
+    is CapabilityRoute.Mirror -> "mirror:$endpointId"
+}
+
+fun persistedCapabilityRoute(value: String, legacyEndpointId: String? = null): CapabilityRoute = when {
+    value == "simulator" || value == CapabilityMode.SIMULATOR_CONFIGURATION.name ->
+        CapabilityRoute.SimulatorConfiguration
+    value.startsWith("mirror:") -> CapabilityRoute.Mirror(value.removePrefix("mirror:"))
+    value == CapabilityMode.MIRROR_CONNECTED_SERVICE.name && legacyEndpointId != null ->
+        CapabilityRoute.Mirror(legacyEndpointId)
+    else -> CapabilityRoute.SimulatorConfiguration
+}
+
+@Deprecated("Use CapabilityRoute so the mirrored endpoint is explicit")
 enum class CapabilityMode {
     SIMULATOR_CONFIGURATION,
     MIRROR_CONNECTED_SERVICE
@@ -140,6 +178,90 @@ data class EndpointCapabilities(
 
 data class DeviceIdentity(val address: String, val name: String?)
 
+/** Protocol-neutral address of a characteristic inside a discovered remote GATT table. */
+data class GattCharacteristicRef(
+    val serviceUuid: UUID,
+    val characteristicUuid: UUID
+)
+
+/** Advertisement data retained for adapter matching without exposing Android BLE classes to providers. */
+data class InputAdvertisement(
+    val deviceAddress: String,
+    val deviceName: String?,
+    val serviceUuids: Set<UUID>,
+    val manufacturerData: Map<Int, ByteArray> = emptyMap(),
+    val serviceData: Map<UUID, ByteArray> = emptyMap()
+)
+
+data class InputGattCharacteristic(
+    val uuid: UUID,
+    val readable: Boolean,
+    val writable: Boolean,
+    val writableWithoutResponse: Boolean,
+    val notifiable: Boolean,
+    val indicatable: Boolean
+)
+
+data class InputGattService(
+    val uuid: UUID,
+    val characteristics: Map<UUID, InputGattCharacteristic>
+)
+
+data class InputDeviceDiscovery(
+    val advertisement: InputAdvertisement?,
+    val services: Map<UUID, InputGattService>
+) {
+    val deviceAddress: String get() = advertisement?.deviceAddress.orEmpty()
+    val deviceName: String? get() = advertisement?.deviceName
+}
+
+enum class InputMatchConfidence { NONE, POSSIBLE, EXACT }
+
+data class InputAdapterMatch(
+    val confidence: InputMatchConfidence,
+    val reason: String? = null
+)
+
+data class InputProbePlan(
+    val readCharacteristics: Set<GattCharacteristicRef> = emptySet(),
+    val subscribeCharacteristics: Set<GattCharacteristicRef> = emptySet(),
+    @Deprecated("Use safeTransactions so every active probe has an explicit non-mutating purpose")
+    val transactions: List<AdapterTransaction> = emptyList(),
+    val safeTransactions: List<SafeProbeTransaction> = emptyList()
+)
+
+enum class SafeProbePurpose { IDENTITY, STATUS, NO_OP }
+
+/** An active probe that a provider explicitly declares to be observational and non-mutating. */
+data class SafeProbeTransaction(
+    val transaction: AdapterTransaction,
+    val purpose: SafeProbePurpose
+)
+
+data class InputProbeNotification(
+    val characteristic: GattCharacteristicRef,
+    val value: ByteArray
+)
+
+data class InputProbeResult(
+    val readValues: Map<GattCharacteristicRef, ByteArray> = emptyMap(),
+    val notifications: List<InputProbeNotification> = emptyList()
+)
+
+/** One logical route endpoint may consume several physical notification characteristics. */
+data class InputEndpointDefinition(
+    val key: String,
+    val primaryMeasurement: GattCharacteristicRef,
+    val measurementCharacteristics: Set<GattCharacteristicRef> = setOf(primaryMeasurement),
+    val supportedMetrics: Set<Metric>,
+    val controlPoint: GattCharacteristicRef? = null,
+    val protocolId: String,
+    val serviceName: String,
+    val controlCapabilities: Set<ControlCommand.Kind> = emptySet(),
+    val settingsActivityClassName: String? = null,
+    val requiresFirstMeasurementBeforeReady: Boolean = false
+)
+
 enum class GattWritePreference {
     WITH_RESPONSE,
     WITHOUT_RESPONSE,
@@ -156,6 +278,8 @@ enum class TransactionCompletion {
 data class AdapterTransaction(
     val characteristicUuid: UUID,
     val value: ByteArray,
+    /** Optional service qualification; null retains compatibility with legacy unique-characteristic adapters. */
+    val serviceUuid: UUID? = null,
     val writePreference: GattWritePreference = GattWritePreference.WITH_RESPONSE,
     val completion: TransactionCompletion = TransactionCompletion.WRITE_CALLBACK,
     val responseCharacteristicUuid: UUID? = null,
@@ -279,6 +403,9 @@ object StandardBleUuids {
 
 interface InputAdapter {
     val providerId: String
+    /** Stable family identity used for automatic matching and remembered user overrides. */
+    val adapterId: String get() = providerId
+    val displayName: String get() = providerId
     val supportedServices: Set<UUID>
     val measurementCharacteristics: Set<UUID>
     val statusCharacteristics: Set<UUID> get() = emptySet()
@@ -300,6 +427,23 @@ interface InputAdapter {
     fun serviceName(serviceUuid: UUID): String
     fun supportedMetrics(characteristicUuid: UUID): Set<Metric>
     fun matchesAdvertisement(serviceUuids: Set<UUID>): Boolean = serviceUuids.any { it in supportedServices }
+    fun matchesAdvertisement(advertisement: InputAdvertisement): Boolean =
+        matchesAdvertisement(advertisement.serviceUuids)
+    fun match(discovery: InputDeviceDiscovery): InputAdapterMatch =
+        if (discovery.services.keys.any { it in supportedServices }) {
+            InputAdapterMatch(InputMatchConfidence.POSSIBLE)
+        } else {
+            InputAdapterMatch(InputMatchConfidence.NONE)
+        }
+    fun probePlan(discovery: InputDeviceDiscovery): InputProbePlan = InputProbePlan()
+    fun evaluateProbe(discovery: InputDeviceDiscovery, result: InputProbeResult): InputAdapterMatch =
+        match(discovery)
+    fun openSession(
+        discovery: InputDeviceDiscovery,
+        probeResult: InputProbeResult = InputProbeResult()
+    ): InputAdapterSession? =
+        if (evaluateProbe(discovery, probeResult).confidence == InputMatchConfidence.NONE) null
+        else DefaultInputAdapterSession(this, discovery)
     fun initializationTransactions(serviceUuid: UUID): List<AdapterTransaction> = emptyList()
     fun followUpTransactions(endpointId: String, measurement: DecodedMeasurement): List<AdapterTransaction> = emptyList()
     fun encodeControl(command: ControlCommand): AdapterTransaction? = null
@@ -311,6 +455,121 @@ interface InputAdapter {
     fun decode(characteristicUuid: UUID, value: ByteArray, timestampMillis: Long): DecodedMeasurement?
     fun decode(endpointId: String, characteristicUuid: UUID, value: ByteArray, timestampMillis: Long): DecodedMeasurement? =
         decode(characteristicUuid, value, timestampMillis)
+}
+
+/**
+ * Per-connection adapter state. Providers that need probing, polling, multi-service endpoints or
+ * explicit cleanup override [InputAdapter.openSession]; existing adapters use the default wrapper.
+ */
+interface InputAdapterSession {
+    val adapterId: String
+    val displayName: String
+    val readableCharacteristics: Set<GattCharacteristicRef>
+    val subscriptionCharacteristics: Set<GattCharacteristicRef>
+    val pollingIntervalMillis: Long? get() = null
+
+    fun endpointDefinitions(capabilityValues: Map<GattCharacteristicRef, ByteArray>): List<InputEndpointDefinition>
+    fun initializationTransactions(): List<AdapterTransaction>
+    fun pollTransactions(): List<AdapterTransaction> = emptyList()
+    fun qualifiesAsReadyMeasurement(measurement: DecodedMeasurement): Boolean = true
+    fun decode(
+        endpointId: String,
+        characteristic: GattCharacteristicRef,
+        value: ByteArray,
+        timestampMillis: Long
+    ): DecodedMeasurement?
+    fun followUpTransactions(endpointId: String, measurement: DecodedMeasurement): List<AdapterTransaction> =
+        emptyList()
+    fun handleControlLocally(command: ControlCommand): ControlResult? = null
+    fun encodeControlTransactions(command: ControlCommand, endpoint: SourceEndpoint?): List<AdapterTransaction> =
+        emptyList()
+    fun controlResult(command: ControlCommand, success: Boolean, response: ByteArray?): ControlResult =
+        ControlResult(if (success) ControlStatus.SUCCESS else ControlStatus.FAILED, protocolResponse = response)
+    fun close() = Unit
+}
+
+private class DefaultInputAdapterSession(
+    private val adapter: InputAdapter,
+    private val discovery: InputDeviceDiscovery
+) : InputAdapterSession {
+    private val matchingServices = discovery.services.values.filter { it.uuid in adapter.supportedServices }
+
+    override val adapterId: String = adapter.adapterId
+    override val displayName: String = adapter.displayName
+    override val readableCharacteristics: Set<GattCharacteristicRef> = matchingServices.flatMap { service ->
+        service.characteristics.keys.filter { it in adapter.readableCapabilityCharacteristics }
+            .map { GattCharacteristicRef(service.uuid, it) }
+    }.toSet()
+    override val subscriptionCharacteristics: Set<GattCharacteristicRef> = matchingServices.flatMap { service ->
+        service.characteristics.keys.filter {
+            it in adapter.measurementCharacteristics ||
+                it in adapter.statusCharacteristics ||
+                it in adapter.controlPointCharacteristics
+        }.map { GattCharacteristicRef(service.uuid, it) }
+    }.toSet()
+
+    override fun endpointDefinitions(
+        capabilityValues: Map<GattCharacteristicRef, ByteArray>
+    ): List<InputEndpointDefinition> = matchingServices.flatMap { service ->
+        val serviceCapabilities = capabilityValues.filterKeys { it.serviceUuid == service.uuid }
+            .mapKeys { it.key.characteristicUuid }
+        val control = service.characteristics.keys.firstOrNull { it in adapter.controlPointCharacteristics }
+            ?.let { GattCharacteristicRef(service.uuid, it) }
+        service.characteristics.keys.filter { it in adapter.measurementCharacteristics }.map { measurement ->
+            val measurementRef = GattCharacteristicRef(service.uuid, measurement)
+            InputEndpointDefinition(
+                key = "${service.uuid}|$measurement",
+                primaryMeasurement = measurementRef,
+                supportedMetrics = adapter.supportedMetrics(measurement),
+                controlPoint = control,
+                protocolId = adapter.protocolId(service.uuid),
+                serviceName = adapter.serviceName(service.uuid),
+                controlCapabilities = adapter.controlCapabilities(service.uuid, serviceCapabilities),
+                settingsActivityClassName = adapter.settingsActivityClassName,
+                requiresFirstMeasurementBeforeReady = adapter.requiresFirstMeasurementBeforeReady
+            )
+        }
+    }
+
+    override fun initializationTransactions(): List<AdapterTransaction> =
+        matchingServices.flatMap { service ->
+            adapter.initializationTransactions(service.uuid).map { transaction ->
+                if (transaction.serviceUuid == null) transaction.copy(serviceUuid = service.uuid) else transaction
+            }
+        }
+
+    override fun qualifiesAsReadyMeasurement(measurement: DecodedMeasurement): Boolean =
+        adapter.qualifiesAsReadyMeasurement(measurement)
+
+    override fun decode(
+        endpointId: String,
+        characteristic: GattCharacteristicRef,
+        value: ByteArray,
+        timestampMillis: Long
+    ): DecodedMeasurement? =
+        adapter.decode(endpointId, characteristic.characteristicUuid, value, timestampMillis)
+
+    override fun followUpTransactions(
+        endpointId: String,
+        measurement: DecodedMeasurement
+    ): List<AdapterTransaction> =
+        adapter.followUpTransactions(endpointId, measurement)
+
+    override fun handleControlLocally(command: ControlCommand): ControlResult? =
+        adapter.handleControlLocally(command)
+
+    override fun encodeControlTransactions(
+        command: ControlCommand,
+        endpoint: SourceEndpoint?
+    ): List<AdapterTransaction> =
+        adapter.encodeControlTransactions(command, endpoint)
+
+    override fun controlResult(
+        command: ControlCommand,
+        success: Boolean,
+        response: ByteArray?
+    ): ControlResult =
+        adapter.controlResult(command, success, response)
 }
 
 interface InputAdapterProvider {
@@ -326,8 +585,60 @@ class InputAdapterRegistry(providers: Iterable<InputAdapterProvider>, context: C
     fun adapterForProtocol(protocolId: String): InputAdapter? = adapters.firstOrNull { adapter ->
         adapter.protocolId == protocolId || adapter.supportedServices.any { adapter.protocolId(it) == protocolId }
     }
+    fun adapterById(adapterId: String): InputAdapter? = adapters.firstOrNull { it.adapterId == adapterId }
+    fun candidates(discovery: InputDeviceDiscovery): List<Pair<InputAdapter, InputAdapterMatch>> =
+        adapters.map { it to it.match(discovery) }
+            .filter { it.second.confidence != InputMatchConfidence.NONE }
+            .sortedByDescending { it.second.confidence.ordinal }
     fun matchesAdvertisement(serviceUuids: Set<UUID>): Boolean = adapters.any { it.matchesAdvertisement(serviceUuids) }
+    fun matchesAdvertisement(advertisement: InputAdvertisement): Boolean =
+        adapters.any { it.matchesAdvertisement(advertisement) }
     val supportedServiceUuids: Set<UUID> = adapters.flatMap(InputAdapter::supportedServices).toSet()
+}
+
+sealed interface InputAdapterSelection {
+    data class Selected(val adapters: List<InputAdapter>) : InputAdapterSelection
+    data class Ambiguous(val adapters: List<InputAdapter>) : InputAdapterSelection
+    data class IncompatibleOverride(val adapterId: String) : InputAdapterSelection
+    data object NoMatch : InputAdapterSelection
+}
+
+/**
+ * Resolves already-probed candidates per discovered service. An override is accepted only when
+ * that adapter still validates against this device; otherwise callers must surface an error.
+ */
+fun selectInputAdapters(
+    serviceUuids: Set<UUID>,
+    evaluatedCandidates: List<Pair<InputAdapter, InputAdapterMatch>>,
+    overrideAdapterId: String? = null
+): InputAdapterSelection {
+    val candidates = evaluatedCandidates.filter { it.second.confidence != InputMatchConfidence.NONE }
+    val overridden = overrideAdapterId?.let { id ->
+        candidates.firstOrNull { it.first.adapterId == id }?.first
+            ?: return InputAdapterSelection.IncompatibleOverride(id)
+    }
+    val selected = linkedSetOf<InputAdapter>()
+    val ambiguous = linkedSetOf<InputAdapter>()
+    serviceUuids.forEach { serviceUuid ->
+        val serviceCandidates = candidates.filter { serviceUuid in it.first.supportedServices }
+        if (serviceCandidates.isEmpty()) return@forEach
+        val serviceOverride = overridden?.takeIf { serviceUuid in it.supportedServices }
+        val exact = serviceCandidates.filter { it.second.confidence == InputMatchConfidence.EXACT }
+        when {
+            serviceOverride != null -> selected += serviceOverride
+            exact.size == 1 -> selected += exact.single().first
+            exact.size > 1 -> ambiguous += exact.map { it.first }
+            serviceCandidates.size == 1 -> selected += serviceCandidates.single().first
+            else -> ambiguous += serviceCandidates.map { it.first }
+        }
+    }
+    return when {
+        ambiguous.isNotEmpty() ->
+            InputAdapterSelection.Ambiguous(ambiguous.distinctBy(InputAdapter::adapterId))
+        selected.isNotEmpty() ->
+            InputAdapterSelection.Selected(selected.distinctBy(InputAdapter::adapterId))
+        else -> InputAdapterSelection.NoMatch
+    }
 }
 
 data class DecodedMeasurement(
