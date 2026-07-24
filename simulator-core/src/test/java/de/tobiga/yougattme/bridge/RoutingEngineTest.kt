@@ -71,6 +71,39 @@ class RoutingEngineTest {
         )
     }
 
+    @Test fun `steering angle routes without transformation and has a stable persisted name`() {
+        val route = ServiceRoute(
+            outputKey = "private-output",
+            outputService = null,
+            fieldOverrides = mapOf(
+                Metric.STEERING_ANGLE_DEGREES to RouteSource.Endpoint("steerer")
+            )
+        )
+        val value = -17.25
+        val resolved = engine.resolve(
+            route,
+            setOf(Metric.STEERING_ANGLE_DEGREES),
+            mapOf(
+                "steerer" to mapOf(
+                    Metric.STEERING_ANGLE_DEGREES to sample(
+                        Metric.STEERING_ANGLE_DEGREES,
+                        value,
+                        "steerer",
+                        10_000
+                    )
+                )
+            ),
+            10_100
+        )
+
+        assertEquals(value, resolved.values[Metric.STEERING_ANGLE_DEGREES]!!.value, 0.0)
+        assertEquals(
+            Metric.STEERING_ANGLE_DEGREES,
+            Metric.valueOf(Metric.STEERING_ANGLE_DEGREES.name)
+        )
+        assertEquals("-17.3°", formatMetricForLog(Metric.STEERING_ANGLE_DEGREES, value))
+    }
+
     private fun sample(metric: Metric, value: Double, endpoint: String, time: Long, observed: Long? = null) =
         MetricSample(metric, value, endpoint, time, observedIntervalMillis = observed)
 }

@@ -867,6 +867,7 @@ class MainActivity : AppCompatActivity() {
         Metric.STRIDE_LENGTH_METERS -> String.format(Locale.US, "%.2f m", value)
         Metric.ACCUMULATED_TORQUE_NM -> String.format(Locale.US, "%.1f Nm", value)
         Metric.ACCUMULATED_ENERGY_KJ, Metric.HEART_RATE_ENERGY_KJ -> String.format(Locale.US, "%.1f kJ", value)
+        Metric.STEERING_ANGLE_DEGREES -> String.format(Locale.US, "%.1f°", value)
         Metric.STEP_RATE_PER_MINUTE, Metric.AVERAGE_STEP_RATE_PER_MINUTE,
         Metric.STROKE_RATE_PER_MINUTE, Metric.AVERAGE_STROKE_RATE_PER_MINUTE ->
             "${value.roundToInt()} /min"

@@ -19,8 +19,12 @@ internal sealed class GattOperation(
     class RequestMtu(val mtu: Int, completion: (Boolean, ByteArray?) -> Unit = { _, _ -> }) :
         GattOperation(completion = completion)
     class Discover(completion: (Boolean, ByteArray?) -> Unit) : GattOperation(completion = completion)
-    class Read(val characteristic: BluetoothGattCharacteristic, completion: (Boolean, ByteArray?) -> Unit) :
-        GattOperation(completion = completion)
+    class Read(
+        val characteristic: BluetoothGattCharacteristic,
+        timeoutMillis: Long = 10_000L,
+        fatalOnTimeout: Boolean = true,
+        completion: (Boolean, ByteArray?) -> Unit
+    ) : GattOperation(timeoutMillis, fatalOnTimeout, completion)
     class Subscribe(val characteristic: BluetoothGattCharacteristic, val indications: Boolean,
         completion: (Boolean, ByteArray?) -> Unit = { _, _ -> }) : GattOperation(completion = completion)
     class Write(

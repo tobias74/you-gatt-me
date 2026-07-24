@@ -2,6 +2,7 @@ package de.tobiga.yougattme.bridge
 
 import java.util.UUID
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -70,6 +71,7 @@ class AdapterSessionInfrastructureTest {
         val session = adapter.openSession(discovery())!!
         val measurementRef = GattCharacteristicRef(service, measurement)
 
+        assertNull(session.preflightError)
         assertEquals(setOf(measurementRef, GattCharacteristicRef(service, control)),
             session.subscriptionCharacteristics)
         assertEquals(setOf(GattCharacteristicRef(service, capability)), session.readableCharacteristics)
@@ -108,6 +110,47 @@ class AdapterSessionInfrastructureTest {
 
         assertTrue(plan.transactions.isEmpty())
         assertEquals(SafeProbePurpose.NO_OP, plan.safeTransactions.single().purpose)
+    }
+
+    @Test
+    fun `adapter transactions default to writes and can express service-qualified reads`() {
+        val write = AdapterTransaction(control, byteArrayOf(1), service)
+        val read = AdapterTransaction(
+            characteristicUuid = measurement,
+            serviceUuid = service,
+            timeoutMillis = 1_234L,
+            fatalOnTimeout = false,
+            operation = AdapterTransactionOperation.READ
+        )
+
+        assertEquals(AdapterTransactionOperation.WRITE, write.operation)
+        assertEquals(AdapterTransactionOperation.READ, read.operation)
+        assertTrue(read.value.isEmpty())
+        assertEquals(service, read.serviceUuid)
+        assertEquals(1_234L, read.timeoutMillis)
+        assertFalse(read.fatalOnTimeout)
+    }
+
+    @Test
+    fun `sessions can report an actionable preflight error without changing existing adapters`() {
+        val blocked = object : InputAdapterSession {
+            override val adapterId = "blocked"
+            override val displayName = "Blocked adapter"
+            override val preflightError = "Install the required local protocol data."
+            override val readableCharacteristics = emptySet<GattCharacteristicRef>()
+            override val subscriptionCharacteristics = emptySet<GattCharacteristicRef>()
+            override fun endpointDefinitions(capabilityValues: Map<GattCharacteristicRef, ByteArray>) =
+                emptyList<InputEndpointDefinition>()
+            override fun initializationTransactions() = emptyList<AdapterTransaction>()
+            override fun decode(
+                endpointId: String,
+                characteristic: GattCharacteristicRef,
+                value: ByteArray,
+                timestampMillis: Long
+            ) = null
+        }
+
+        assertEquals("Install the required local protocol data.", blocked.preflightError)
     }
 
     private fun discovery() = InputDeviceDiscovery(

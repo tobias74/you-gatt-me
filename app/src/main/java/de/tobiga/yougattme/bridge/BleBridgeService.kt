@@ -57,6 +57,7 @@ import de.tobiga.yougattme.bridge.SourceEndpoint
 import de.tobiga.yougattme.bridge.StandardBleUuids
 import de.tobiga.yougattme.bridge.StandardInputAdapterProvider
 import de.tobiga.yougattme.bridge.StandardService
+import de.tobiga.yougattme.bridge.formatMetricForLog
 import de.tobiga.yougattme.bridge.persistedCapabilityRoute
 import de.tobiga.yougattme.bridge.persistedValue
 import de.tobiga.yougattme.gatt.fitnessmachine.FtmsSupportedRanges
@@ -877,6 +878,13 @@ class BleBridgeService : Service() {
                 updateStatus(InputConnectionStatus.ERROR, "Matching adapters rejected the protocol probe")
                 return
             }
+            inputSessions.firstNotNullOfOrNull(InputAdapterSession::preflightError)?.let { error ->
+                inputSessions.forEach(InputAdapterSession::close)
+                inputSessions.clear()
+                resolvingAdapters = false
+                updateStatus(InputConnectionStatus.ERROR, error)
+                return
+            }
             updateStatus(InputConnectionStatus.INITIALIZING, "Reading capabilities and subscribing")
             inputSessions.flatMap { it.readableCharacteristics }.distinct().forEach { reference ->
                 if (reference in capabilityBytes) return@forEach
@@ -891,7 +899,7 @@ class BleBridgeService : Service() {
             }
             inputSessions.forEach { session ->
                 session.initializationTransactions().forEach { transaction ->
-                    enqueueAdapterTransaction(transaction, session.displayName)
+                    enqueueAdapterTransaction(transaction, session.displayName, session)
                 }
             }
             queue.enqueue(GattOperation.Barrier { success, _ ->
@@ -1021,7 +1029,7 @@ class BleBridgeService : Service() {
             runnable = Runnable {
                 if (!isOpen || session !in inputSessions) return@Runnable
                 session.pollTransactions().forEach { transaction ->
-                    enqueueAdapterTransaction(transaction, "${session.displayName} poll")
+                    enqueueAdapterTransaction(transaction, "${session.displayName} poll", session)
                 }
                 queue.enqueue(GattOperation.Barrier { _, _ ->
                     if (isOpen && session in inputSessions) handler.postDelayed(runnable, interval)
@@ -1041,37 +1049,79 @@ class BleBridgeService : Service() {
             val endpoint = endpointByCharacteristic[reference]
             val inputSession = endpoint?.let { endpointSessionById[it.id] }
             if (endpoint != null && inputSession != null) {
-                val decoded = inputSession.decode(endpoint.id, reference, value, System.currentTimeMillis())
-                if (decoded == null) {
-                    bridge.addLog("UPSTREAM RX", "Rejected malformed ${characteristic.uuid}", value)
-                    return
-                }
-                val normalized = derived.addDerived(endpoint.id, decoded)
-                if (inputSession.qualifiesAsReadyMeasurement(normalized)) {
-                    endpointsWithValidMeasurements += endpoint.id
-                    if (awaitingMeasurementEndpoints.remove(endpoint.id)) promoteInitializedEndpoint(endpoint.id)
-                }
-                bridge.addLog("UPSTREAM RX", "${endpoint.serviceName} ${characteristic.uuid}", value)
-                bridge.accept(endpoint.id, normalized)
-                inputSession.followUpTransactions(endpoint.id, normalized).forEach { transaction ->
-                    enqueueAdapterTransaction(transaction, endpoint.serviceName)
-                }
-                val decodedSummary = normalized.metrics.entries.joinToString { "${it.key.name}=${"%.2f".format(it.value)}" }
-                    .ifBlank { normalized.protocolFields.entries.joinToString { "${it.key}=${it.value}" } }
-                bridge.addLog("DECODED", decodedSummary)
-                resolveAndApplyRoutes()
+                acceptAdapterValue(endpoint, inputSession, reference, value, "UPSTREAM RX")
             } else {
                 bridge.addLog("UPSTREAM RX", "Status ${characteristic.uuid}", value)
             }
         }
 
-        private fun enqueueAdapterTransaction(transaction: AdapterTransaction, label: String) {
+        private fun acceptAdapterValue(
+            endpoint: SourceEndpoint,
+            inputSession: InputAdapterSession,
+            reference: GattCharacteristicRef,
+            value: ByteArray,
+            logCategory: String
+        ) {
+            val decoded = inputSession.decode(endpoint.id, reference, value, System.currentTimeMillis())
+            if (decoded == null) {
+                bridge.addLog(logCategory, "Rejected malformed ${reference.characteristicUuid}", value)
+                return
+            }
+            val normalized = derived.addDerived(endpoint.id, decoded)
+            if (inputSession.qualifiesAsReadyMeasurement(normalized)) {
+                endpointsWithValidMeasurements += endpoint.id
+                if (awaitingMeasurementEndpoints.remove(endpoint.id)) promoteInitializedEndpoint(endpoint.id)
+            }
+            bridge.addLog(logCategory, "${endpoint.serviceName} ${reference.characteristicUuid}", value)
+            bridge.accept(endpoint.id, normalized)
+            inputSession.followUpTransactions(endpoint.id, normalized).forEach { transaction ->
+                enqueueAdapterTransaction(transaction, endpoint.serviceName, inputSession)
+            }
+            val decodedSummary = normalized.metrics.entries.joinToString {
+                "${it.key.name}=${formatMetricForLog(it.key, it.value)}"
+            }.ifBlank { normalized.protocolFields.entries.joinToString { "${it.key}=${it.value}" } }
+            bridge.addLog("DECODED", decodedSummary)
+            resolveAndApplyRoutes()
+        }
+
+        private fun enqueueAdapterTransaction(
+            transaction: AdapterTransaction,
+            label: String,
+            session: InputAdapterSession? = null
+        ) {
             if (transaction.delayBeforeMillis > 0L) queue.enqueue(GattOperation.Delay(transaction.delayBeforeMillis))
-            val target = transaction.serviceUuid?.let { serviceUuid ->
-                findCharacteristic(GattCharacteristicRef(serviceUuid, transaction.characteristicUuid))
-            } ?: findCharacteristic(transaction.characteristicUuid)
+            val reference = transaction.serviceUuid?.let {
+                GattCharacteristicRef(it, transaction.characteristicUuid)
+            }
+            val target = reference?.let(::findCharacteristic) ?: findCharacteristic(transaction.characteristicUuid)
             if (target == null) {
                 bridge.addLog("GATT", "Provider transaction characteristic missing: ${transaction.characteristicUuid}")
+                return
+            }
+            if (transaction.operation == AdapterTransactionOperation.READ) {
+                if (target.properties and BluetoothGattCharacteristic.PROPERTY_READ == 0) {
+                    bridge.addLog("GATT", "Provider read characteristic is not readable: ${transaction.characteristicUuid}")
+                    return
+                }
+                queue.enqueue(GattOperation.Read(
+                    characteristic = target,
+                    timeoutMillis = transaction.timeoutMillis,
+                    fatalOnTimeout = transaction.fatalOnTimeout
+                ) { success, response ->
+                    bridge.addLog(
+                        "GATT",
+                        "Provider read ${if (success) "completed" else "degraded"}: $label",
+                        response
+                    )
+                    if (!success || response == null) return@Read
+                    val resolvedReference = reference ?: target.service?.uuid?.let {
+                        GattCharacteristicRef(it, target.uuid)
+                    } ?: return@Read
+                    if (resolvingAdapters) capabilityBytes[resolvedReference] = response.copyOf()
+                    val endpoint = endpointByCharacteristic[resolvedReference] ?: return@Read
+                    val owningSession = session ?: endpointSessionById[endpoint.id] ?: return@Read
+                    acceptAdapterValue(endpoint, owningSession, resolvedReference, response, "UPSTREAM READ")
+                })
                 return
             }
             queue.enqueue(GattOperation.Write(

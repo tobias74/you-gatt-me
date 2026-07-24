@@ -1,6 +1,7 @@
 package de.tobiga.yougattme.bridge
 
 import android.content.Context
+import java.util.Locale
 import java.util.UUID
 
 enum class StandardService(val shortName: String, val serviceUuid: UUID) {
@@ -57,8 +58,16 @@ enum class Metric(val displayName: String) {
     RR_INTERVAL_SECONDS("RR interval"),
     HEART_RATE_ENERGY_KJ("HR energy"),
     MOVEMENT_DIRECTION("Movement direction"),
-    WALKING_RUNNING_STATUS("Walking/running")
+    WALKING_RUNNING_STATUS("Walking/running"),
+    /** Zero-centred handlebar angle; positive is right/clockwise. */
+    STEERING_ANGLE_DEGREES("Steering angle")
 }
+
+fun formatMetricForLog(metric: Metric, value: Double): String =
+    when (metric) {
+        Metric.STEERING_ANGLE_DEGREES -> String.format(Locale.US, "%.1f°", value)
+        else -> String.format(Locale.US, "%.2f", value)
+    }
 
 data class SourceEndpoint(
     val id: String,
@@ -274,10 +283,15 @@ enum class TransactionCompletion {
     MATCHING_NOTIFICATION
 }
 
-/** A provider-defined initialization write performed after subscriptions have completed. */
+enum class AdapterTransactionOperation {
+    WRITE,
+    READ
+}
+
+/** A provider-defined serialized GATT transaction performed by an adapter session. */
 data class AdapterTransaction(
     val characteristicUuid: UUID,
-    val value: ByteArray,
+    val value: ByteArray = ByteArray(0),
     /** Optional service qualification; null retains compatibility with legacy unique-characteristic adapters. */
     val serviceUuid: UUID? = null,
     val writePreference: GattWritePreference = GattWritePreference.WITH_RESPONSE,
@@ -286,7 +300,9 @@ data class AdapterTransaction(
     val delayBeforeMillis: Long = 0L,
     val timeoutMillis: Long = 10_000L,
     val fatalOnTimeout: Boolean = true,
-    val responseMatcher: (ByteArray) -> Boolean = { true }
+    val responseMatcher: (ByteArray) -> Boolean = { true },
+    /** Defaults to WRITE so existing provider binaries and source remain compatible. */
+    val operation: AdapterTransactionOperation = AdapterTransactionOperation.WRITE
 )
 
 /** Protocol-neutral controls used when a command crosses a protocol boundary. */
@@ -464,6 +480,11 @@ interface InputAdapter {
 interface InputAdapterSession {
     val adapterId: String
     val displayName: String
+    /**
+     * Provider-authored actionable reason why this otherwise compatible session cannot start.
+     * Null preserves existing adapter behavior.
+     */
+    val preflightError: String? get() = null
     val readableCharacteristics: Set<GattCharacteristicRef>
     val subscriptionCharacteristics: Set<GattCharacteristicRef>
     val pollingIntervalMillis: Long? get() = null
