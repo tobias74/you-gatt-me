@@ -6,6 +6,9 @@ import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattServer
 import android.bluetooth.BluetoothStatusCodes
 import android.util.Log
+import de.tobiga.yougattme.gatt.trace.BleTrafficDirection
+import de.tobiga.yougattme.gatt.trace.BleTrafficRole
+import de.tobiga.yougattme.gatt.trace.BleTrafficTrace
 import java.util.ArrayDeque
 import java.util.IdentityHashMap
 import java.util.concurrent.atomic.AtomicLong
@@ -108,6 +111,15 @@ object GattNotificationDispatcher {
             )
             return
         }
+        BleTrafficTrace.record(
+            role = BleTrafficRole.PERIPHERAL,
+            direction = BleTrafficDirection.EVENT,
+            event = if (completed.confirm) "INDICATION_SENT" else "NOTIFICATION_SENT",
+            deviceAddress = device.address,
+            serviceUuid = completed.characteristic.service?.uuid,
+            characteristicUuid = completed.characteristic.uuid,
+            status = status
+        )
         queue.inFlight = null
         completed.onComplete?.invoke(status)
         sendNext(server, queue)
@@ -147,6 +159,15 @@ object GattNotificationDispatcher {
         while (queue.pending.isNotEmpty()) {
             val next = queue.pending.removeFirst()
             queue.inFlight = next
+            BleTrafficTrace.record(
+                role = BleTrafficRole.PERIPHERAL,
+                direction = BleTrafficDirection.OUT,
+                event = if (next.confirm) "INDICATION" else "NOTIFICATION",
+                deviceAddress = next.device.address,
+                serviceUuid = next.characteristic.service?.uuid,
+                characteristicUuid = next.characteristic.uuid,
+                value = next.value
+            )
             val result = server.notifyCharacteristicChanged(
                 next.device,
                 next.characteristic,

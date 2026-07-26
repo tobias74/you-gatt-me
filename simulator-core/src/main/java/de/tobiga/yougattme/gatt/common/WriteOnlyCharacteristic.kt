@@ -1,5 +1,7 @@
 package de.tobiga.yougattme.gatt.common
 
+import de.tobiga.yougattme.gatt.trace.sendTracedResponse
+
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCharacteristic
@@ -52,7 +54,7 @@ class WriteOnlyCharacteristic(
         offset: Int
     ) {
         // No reads allowed
-        gattProfile.bluetoothGattServer?.sendResponse(
+        gattProfile.bluetoothGattServer?.sendTracedResponse(
             device,
             requestId,
             BluetoothGattCharacteristic.PERMISSION_READ, // or GATT_READ_NOT_PERMITTED
@@ -74,7 +76,7 @@ class WriteOnlyCharacteristic(
 
         // Always ack if requested
         if (responseNeeded) {
-            gattProfile.bluetoothGattServer?.sendResponse(
+            gattProfile.bluetoothGattServer?.sendTracedResponse(
                 device,
                 requestId,
                 BluetoothGatt.GATT_SUCCESS,

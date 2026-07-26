@@ -1,5 +1,21 @@
 <PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto" xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <PreferenceCategory app:title="@string/ble_capture_category">
+
+        <SwitchPreferenceCompat
+            app:key="diagnostics.ble_capture_enabled"
+            app:defaultValue="false"
+            app:title="@string/ble_capture_title"
+            app:summaryOff="@string/ble_capture_summary_off"
+            app:summaryOn="@string/ble_capture_summary_on" />
+
+        <Preference
+            app:selectable="false"
+            app:title="@string/ble_capture_location_title"
+            app:summary="@string/ble_capture_location_summary" />
+
+    </PreferenceCategory>
+
     <PreferenceCategory app:title="@string/watts_settings_header">
 
         <SeekBarPreference

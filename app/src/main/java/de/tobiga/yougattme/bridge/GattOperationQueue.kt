@@ -9,6 +9,9 @@ import android.os.Handler
 import de.tobiga.yougattme.bridge.StandardBleUuids
 import de.tobiga.yougattme.bridge.GattWritePreference
 import de.tobiga.yougattme.bridge.TransactionCompletion
+import de.tobiga.yougattme.gatt.trace.BleTrafficDirection
+import de.tobiga.yougattme.gatt.trace.BleTrafficRole
+import de.tobiga.yougattme.gatt.trace.BleTrafficTrace
 import java.util.UUID
 
 internal sealed class GattOperation(
@@ -117,9 +120,18 @@ internal class GattOperationQueue(
         }
         val gatt = gattProvider()
         return if (gatt == null) false else when (operation) {
-            is GattOperation.RequestMtu -> gatt.requestMtu(operation.mtu)
-            is GattOperation.Discover -> gatt.discoverServices()
-            is GattOperation.Read -> gatt.readCharacteristic(operation.characteristic)
+            is GattOperation.RequestMtu -> {
+                trace(gatt, "MTU_REQUEST", details = mapOf("mtu" to operation.mtu))
+                gatt.requestMtu(operation.mtu)
+            }
+            is GattOperation.Discover -> {
+                trace(gatt, "SERVICE_DISCOVERY_REQUEST")
+                gatt.discoverServices()
+            }
+            is GattOperation.Read -> {
+                trace(gatt, "CHARACTERISTIC_READ_REQUEST", operation.characteristic)
+                gatt.readCharacteristic(operation.characteristic)
+            }
             is GattOperation.Subscribe -> subscribe(gatt, operation)
             is GattOperation.Write -> write(gatt, operation)
             is GattOperation.Barrier -> true
@@ -144,6 +156,16 @@ internal class GattOperationQueue(
         }
         if (writeType == BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE && !supportsNoResponse) return false
         if (writeType == BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT && !supportsResponse) return false
+        trace(
+            gatt,
+            "CHARACTERISTIC_WRITE",
+            characteristic,
+            operation.value,
+            mapOf(
+                "write_type" to writeType,
+                "completion" to operation.completionMode.name
+            )
+        )
         val started = gatt.writeCharacteristic(characteristic, operation.value, writeType) == BluetoothStatusCodes.SUCCESS
         if (started && operation.completionMode == TransactionCompletion.MATCHING_NOTIFICATION &&
             writeType == BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) {
@@ -160,7 +182,41 @@ internal class GattOperationQueue(
         val descriptor = operation.characteristic.getDescriptor(StandardBleUuids.CCCD) ?: return false
         val value = if (operation.indications) BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
         else BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+        BleTrafficTrace.record(
+            role = BleTrafficRole.CENTRAL,
+            direction = BleTrafficDirection.OUT,
+            event = "DESCRIPTOR_WRITE",
+            deviceAddress = gatt.device.address,
+            deviceName = gatt.device.name,
+            serviceUuid = operation.characteristic.service?.uuid,
+            characteristicUuid = operation.characteristic.uuid,
+            descriptorUuid = descriptor.uuid,
+            value = value,
+            details = mapOf(
+                "subscription" to if (operation.indications) "INDICATE" else "NOTIFY"
+            )
+        )
         return gatt.writeDescriptor(descriptor, value) == BluetoothStatusCodes.SUCCESS
+    }
+
+    private fun trace(
+        gatt: BluetoothGatt,
+        event: String,
+        characteristic: BluetoothGattCharacteristic? = null,
+        value: ByteArray? = null,
+        details: Map<String, Any?> = emptyMap()
+    ) {
+        BleTrafficTrace.record(
+            role = BleTrafficRole.CENTRAL,
+            direction = BleTrafficDirection.OUT,
+            event = event,
+            deviceAddress = gatt.device.address,
+            deviceName = gatt.device.name,
+            serviceUuid = characteristic?.service?.uuid,
+            characteristicUuid = characteristic?.uuid,
+            value = value,
+            details = details
+        )
     }
 
     private fun finish(success: Boolean, value: ByteArray?) {

@@ -1,4 +1,10 @@
 <resources>
+    <string name="ble_capture_category">Diagnostics</string>
+    <string name="ble_capture_title">Record all BLE communication</string>
+    <string name="ble_capture_summary_off">Off. Captures contain device names, addresses, UUIDs, and raw packet bytes.</string>
+    <string name="ble_capture_summary_on">Recording. Turn this off to finish the current capture file.</string>
+    <string name="ble_capture_location_title">Capture location</string>
+    <string name="ble_capture_location_summary">Downloads/YouGattMe/BLE captures (JSON Lines, rotates at 25 MB)</string>
     <string name="app_name">YouGattMe</string>
     <string name="action_settings">Settings</string>
     <!-- Strings used for fragments for navigation -->

@@ -1,4 +1,6 @@
-﻿package de.tobiga.yougattme.gatt.fitnessmachine.characteristics
+package de.tobiga.yougattme.gatt.fitnessmachine.characteristics
+
+import de.tobiga.yougattme.gatt.trace.sendTracedResponse
 
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
@@ -105,7 +107,7 @@ class FitnessMachineControlPointCharacteristic(
     }
 
     override fun onReadRequest(device: BluetoothDevice, requestId: Int, offset: Int) {
-        gattProfile.bluetoothGattServer!!.sendResponse(
+        gattProfile.bluetoothGattServer!!.sendTracedResponse(
             device,
             requestId,
             BluetoothGatt.GATT_READ_NOT_PERMITTED,
@@ -672,7 +674,7 @@ class FitnessMachineControlPointCharacteristic(
         status: Int
     ) {
         if (responseNeeded) {
-            gattProfile.bluetoothGattServer!!.sendResponse(device, requestId, status, 0, null)
+            gattProfile.bluetoothGattServer!!.sendTracedResponse(device, requestId, status, 0, null)
         }
     }
 

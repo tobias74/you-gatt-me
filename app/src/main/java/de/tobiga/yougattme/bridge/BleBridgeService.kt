@@ -63,6 +63,9 @@ import de.tobiga.yougattme.bridge.persistedValue
 import de.tobiga.yougattme.gatt.fitnessmachine.FtmsSupportedRanges
 import de.tobiga.yougattme.gatt.provider.BridgeOutputDefinition
 import de.tobiga.yougattme.gatt.provider.GattProfileProviderLoader
+import de.tobiga.yougattme.gatt.trace.BleTrafficDirection
+import de.tobiga.yougattme.gatt.trace.BleTrafficRole
+import de.tobiga.yougattme.gatt.trace.BleTrafficTrace
 import org.json.JSONObject
 import java.util.UUID
 import kotlin.math.roundToInt
@@ -189,6 +192,12 @@ class BleBridgeService : Service() {
         bridge.setShowAllDevices(showAll)
         val scanner = bluetoothManager.adapter?.bluetoothLeScanner ?: return
         val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build()
+        BleTrafficTrace.record(
+            role = BleTrafficRole.SCANNER,
+            direction = BleTrafficDirection.OUT,
+            event = "SCAN_START",
+            details = mapOf("show_all" to showAll, "scan_mode" to ScanSettings.SCAN_MODE_LOW_LATENCY)
+        )
         scanner.startScan(null, settings, scanCallback)
         scanning = true
         bridge.setScanning(true)
@@ -202,6 +211,11 @@ class BleBridgeService : Service() {
         if (hasBluetoothPermissions()) {
             runCatching { bluetoothManager.adapter?.bluetoothLeScanner?.stopScan(scanCallback) }
         }
+        BleTrafficTrace.record(
+            role = BleTrafficRole.SCANNER,
+            direction = BleTrafficDirection.OUT,
+            event = "SCAN_STOP"
+        )
         scanning = false
         bridge.setScanning(false)
     }
@@ -567,6 +581,22 @@ class BleBridgeService : Service() {
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val record = result.scanRecord
+            BleTrafficTrace.record(
+                role = BleTrafficRole.SCANNER,
+                direction = BleTrafficDirection.IN,
+                event = "ADVERTISEMENT",
+                deviceAddress = result.device.address,
+                deviceName = record?.deviceName,
+                value = record?.bytes,
+                details = mapOf(
+                    "callback_type" to callbackType,
+                    "rssi" to result.rssi,
+                    "tx_power" to result.txPower,
+                    "connectable" to result.isConnectable,
+                    "primary_phy" to result.primaryPhy,
+                    "secondary_phy" to result.secondaryPhy
+                )
+            )
             val advertisedUuids = record?.serviceUuids.orEmpty().map { it.uuid }.toSet()
             val manufacturerData = buildMap {
                 val values = record?.manufacturerSpecificData
@@ -611,6 +641,12 @@ class BleBridgeService : Service() {
         }
 
         override fun onScanFailed(errorCode: Int) {
+            BleTrafficTrace.record(
+                role = BleTrafficRole.SCANNER,
+                direction = BleTrafficDirection.EVENT,
+                event = "SCAN_FAILED",
+                status = errorCode
+            )
             handler.removeCallbacks(stopScanAfterWindow)
             scanning = false
             bridge.setScanning(false)
@@ -646,6 +682,13 @@ class BleBridgeService : Service() {
             userInitiatedClose = false
             updateStatus(InputConnectionStatus.CONNECTING, "Connecting")
             bridge.addLog("GATT", "Connecting to ${knownName ?: device.address}")
+            BleTrafficTrace.record(
+                role = BleTrafficRole.CENTRAL,
+                direction = BleTrafficDirection.OUT,
+                event = "CONNECT_REQUEST",
+                deviceAddress = device.address,
+                deviceName = knownName
+            )
             gatt = device.connectGatt(this@BleBridgeService, false, callback, BluetoothDevice.TRANSPORT_LE)
             isOpen = gatt != null
             if (!isOpen) onDisconnected("connectGatt returned null")
@@ -660,6 +703,14 @@ class BleBridgeService : Service() {
             inputSessions.forEach(InputAdapterSession::close)
             inputSessions.clear()
             endpointIds.forEach { bridge.invalidateEndpoint(it); derived.clear(it) }
+            BleTrafficTrace.record(
+                role = BleTrafficRole.CENTRAL,
+                direction = BleTrafficDirection.OUT,
+                event = "DISCONNECT_REQUEST",
+                deviceAddress = device.address,
+                deviceName = knownName,
+                details = mapOf("user_initiated" to userInitiated)
+            )
             runCatching { gatt?.disconnect() }
             runCatching { gatt?.close() }
             gatt = null
@@ -693,6 +744,15 @@ class BleBridgeService : Service() {
 
         private val callback = object : BluetoothGattCallback() {
             override fun onConnectionStateChange(callbackGatt: BluetoothGatt, status: Int, newState: Int) {
+                BleTrafficTrace.record(
+                    role = BleTrafficRole.CENTRAL,
+                    direction = BleTrafficDirection.EVENT,
+                    event = "CONNECTION_STATE",
+                    deviceAddress = device.address,
+                    deviceName = knownName,
+                    status = status,
+                    details = mapOf("new_state" to newState)
+                )
                 handler.post {
                     if (callbackGatt !== this@DeviceSession.gatt) return@post
                     if (newState == BluetoothProfile.STATE_CONNECTED && status == BluetoothGatt.GATT_SUCCESS) {
@@ -710,14 +770,34 @@ class BleBridgeService : Service() {
             }
 
             override fun onMtuChanged(callbackGatt: BluetoothGatt, mtu: Int, status: Int) {
+                BleTrafficTrace.record(
+                    role = BleTrafficRole.CENTRAL,
+                    direction = BleTrafficDirection.IN,
+                    event = "MTU_RESPONSE",
+                    deviceAddress = device.address,
+                    deviceName = knownName,
+                    status = status,
+                    details = mapOf("mtu" to mtu)
+                )
                 handler.post { if (callbackGatt === this@DeviceSession.gatt) queue.onMtuChanged(status) }
             }
             override fun onServicesDiscovered(callbackGatt: BluetoothGatt, status: Int) {
+                BleTrafficTrace.record(
+                    role = BleTrafficRole.CENTRAL,
+                    direction = BleTrafficDirection.IN,
+                    event = "SERVICE_DISCOVERY_RESPONSE",
+                    deviceAddress = device.address,
+                    deviceName = knownName,
+                    status = status,
+                    details = mapOf("service_count" to callbackGatt.services.size)
+                )
+                if (status == BluetoothGatt.GATT_SUCCESS) recordGattTable(callbackGatt)
                 handler.post { if (callbackGatt === this@DeviceSession.gatt) queue.onServicesDiscovered(status) }
             }
             override fun onCharacteristicRead(callbackGatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic,
                 value: ByteArray, status: Int) {
                 val snapshot = value.copyOf()
+                recordCharacteristicCallback("CHARACTERISTIC_READ_RESPONSE", characteristic, snapshot, status)
                 handler.post {
                     if (callbackGatt === this@DeviceSession.gatt) queue.onCharacteristicRead(characteristic, snapshot, status)
                 }
@@ -725,16 +805,34 @@ class BleBridgeService : Service() {
             @Deprecated("API 32 callback")
             override fun onCharacteristicRead(callbackGatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
                 val snapshot = characteristic.value?.copyOf() ?: ByteArray(0)
+                recordCharacteristicCallback("CHARACTERISTIC_READ_RESPONSE", characteristic, snapshot, status)
                 handler.post {
                     if (callbackGatt === this@DeviceSession.gatt) queue.onCharacteristicRead(characteristic, snapshot, status)
                 }
             }
             override fun onDescriptorWrite(callbackGatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
+                BleTrafficTrace.record(
+                    role = BleTrafficRole.CENTRAL,
+                    direction = BleTrafficDirection.IN,
+                    event = "DESCRIPTOR_WRITE_RESPONSE",
+                    deviceAddress = device.address,
+                    deviceName = knownName,
+                    serviceUuid = descriptor.characteristic.service?.uuid,
+                    characteristicUuid = descriptor.characteristic.uuid,
+                    descriptorUuid = descriptor.uuid,
+                    status = status
+                )
                 handler.post {
                     if (callbackGatt === this@DeviceSession.gatt) queue.onDescriptorWrite(descriptor, status)
                 }
             }
             override fun onCharacteristicWrite(callbackGatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+                recordCharacteristicCallback(
+                    "CHARACTERISTIC_WRITE_RESPONSE",
+                    characteristic,
+                    null,
+                    status
+                )
                 handler.post {
                     if (callbackGatt === this@DeviceSession.gatt) queue.onCharacteristicWrite(characteristic, status)
                 }
@@ -742,12 +840,68 @@ class BleBridgeService : Service() {
             override fun onCharacteristicChanged(callbackGatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic,
                 value: ByteArray) {
                 val snapshot = value.copyOf()
+                recordCharacteristicCallback("NOTIFICATION_OR_INDICATION", characteristic, snapshot, null)
                 handler.post { if (callbackGatt === this@DeviceSession.gatt) handleChanged(characteristic, snapshot) }
             }
             @Deprecated("API 32 callback")
             override fun onCharacteristicChanged(callbackGatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
                 val snapshot = characteristic.value?.copyOf() ?: ByteArray(0)
+                recordCharacteristicCallback("NOTIFICATION_OR_INDICATION", characteristic, snapshot, null)
                 handler.post { if (callbackGatt === this@DeviceSession.gatt) handleChanged(characteristic, snapshot) }
+            }
+        }
+
+        private fun recordCharacteristicCallback(
+            event: String,
+            characteristic: BluetoothGattCharacteristic,
+            value: ByteArray?,
+            status: Int?
+        ) {
+            BleTrafficTrace.record(
+                role = BleTrafficRole.CENTRAL,
+                direction = BleTrafficDirection.IN,
+                event = event,
+                deviceAddress = device.address,
+                deviceName = knownName,
+                serviceUuid = characteristic.service?.uuid,
+                characteristicUuid = characteristic.uuid,
+                value = value,
+                status = status
+            )
+        }
+
+        private fun recordGattTable(callbackGatt: BluetoothGatt) {
+            callbackGatt.services.forEach { service ->
+                BleTrafficTrace.record(
+                    role = BleTrafficRole.CENTRAL,
+                    direction = BleTrafficDirection.EVENT,
+                    event = "GATT_SERVICE",
+                    deviceAddress = device.address,
+                    deviceName = knownName,
+                    serviceUuid = service.uuid,
+                    details = mapOf(
+                        "type" to service.type,
+                        "characteristic_count" to service.characteristics.size
+                    )
+                )
+                service.characteristics.forEach { characteristic ->
+                    BleTrafficTrace.record(
+                        role = BleTrafficRole.CENTRAL,
+                        direction = BleTrafficDirection.EVENT,
+                        event = "GATT_CHARACTERISTIC",
+                        deviceAddress = device.address,
+                        deviceName = knownName,
+                        serviceUuid = service.uuid,
+                        characteristicUuid = characteristic.uuid,
+                        details = mapOf(
+                            "properties" to characteristic.properties,
+                            "permissions" to characteristic.permissions,
+                            "write_type" to characteristic.writeType,
+                            "descriptor_uuids" to characteristic.descriptors
+                                .joinToString(",") { it.uuid.toString() }
+                        )
+                    )
+                }
             }
         }
 

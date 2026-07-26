@@ -1,5 +1,7 @@
 package de.tobiga.yougattme.gatt.csc.characteristics
 
+import de.tobiga.yougattme.gatt.trace.sendTracedResponse
+
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCharacteristic
@@ -40,7 +42,7 @@ class CSCMeasurementCharacteristic(
     )
 
     override fun onReadRequest(device: BluetoothDevice, requestId: Int, offset: Int) {
-        gattProfile.bluetoothGattServer?.sendResponse(
+        gattProfile.bluetoothGattServer?.sendTracedResponse(
             device,
             requestId,
             BluetoothGatt.GATT_READ_NOT_PERMITTED,

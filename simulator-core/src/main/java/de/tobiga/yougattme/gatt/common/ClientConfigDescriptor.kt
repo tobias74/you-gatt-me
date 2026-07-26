@@ -1,5 +1,7 @@
 package de.tobiga.yougattme.gatt.common
 
+import de.tobiga.yougattme.gatt.trace.sendTracedResponse
+
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattDescriptor
@@ -40,7 +42,7 @@ class ClientConfigDescriptor(
 
         Log.d("BLE", "CCCD read from ${device.address}: ${returnValue.joinToString()}")
 
-        gattProfile.bluetoothGattServer!!.sendResponse(
+        gattProfile.bluetoothGattServer!!.sendTracedResponse(
             device,
             requestId,
             BluetoothGatt.GATT_SUCCESS,
@@ -81,7 +83,7 @@ class ClientConfigDescriptor(
         }
 
         if (responseNeeded) {
-            gattProfile.bluetoothGattServer!!.sendResponse(
+            gattProfile.bluetoothGattServer!!.sendTracedResponse(
                 device,
                 requestId,
                 status,

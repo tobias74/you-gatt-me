@@ -1,5 +1,7 @@
 package de.tobiga.yougattme.gatt.heartrate
 
+import de.tobiga.yougattme.gatt.trace.sendTracedResponse
+
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCharacteristic
@@ -109,27 +111,27 @@ private class HeartRateControlPointCharacteristic(
 
     override fun getCharacteristicUUID(): UUID = uuid
     override fun onReadRequest(device: BluetoothDevice, requestId: Int, offset: Int) {
-        gattProfile.bluetoothGattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_READ_NOT_PERMITTED, offset, null)
+        gattProfile.bluetoothGattServer?.sendTracedResponse(device, requestId, BluetoothGatt.GATT_READ_NOT_PERMITTED, offset, null)
     }
 
     override fun onWriteRequest(device: BluetoothDevice, requestId: Int, preparedWrite: Boolean,
         responseNeeded: Boolean, offset: Int, value: ByteArray) {
         if (preparedWrite || offset != 0 || !value.contentEquals(byteArrayOf(0x01))) {
-            if (responseNeeded) gattProfile.bluetoothGattServer?.sendResponse(
+            if (responseNeeded) gattProfile.bluetoothGattServer?.sendTracedResponse(
                 device, requestId, BluetoothGatt.GATT_FAILURE, offset, null
             )
             return
         }
         if (RemoteControlDispatcher.forwardIfConfigured("heart_rate", value) { remote ->
                 if (remote.success) resetEnergy()
-                if (responseNeeded) gattProfile.bluetoothGattServer?.sendResponse(
+                if (responseNeeded) gattProfile.bluetoothGattServer?.sendTracedResponse(
                     device, requestId,
                     if (remote.success) BluetoothGatt.GATT_SUCCESS else BluetoothGatt.GATT_FAILURE,
                     offset, null
                 )
             }) return
         resetEnergy()
-        if (responseNeeded) gattProfile.bluetoothGattServer?.sendResponse(
+        if (responseNeeded) gattProfile.bluetoothGattServer?.sendTracedResponse(
             device, requestId, BluetoothGatt.GATT_SUCCESS, offset, null
         )
     }

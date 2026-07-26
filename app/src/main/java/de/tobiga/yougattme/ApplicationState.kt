@@ -28,6 +28,10 @@ import de.tobiga.yougattme.gatt.cyclingpower.CyclingPowerBroadcastSource
 import de.tobiga.yougattme.gatt.cyclingpower.CyclingPowerProfile
 import de.tobiga.yougattme.gatt.fitnessmachine.FitnessMachineProfile
 import de.tobiga.yougattme.gatt.common.GattNotificationDispatcher
+import de.tobiga.yougattme.gatt.trace.BleTrafficDirection
+import de.tobiga.yougattme.gatt.trace.BleTrafficRole
+import de.tobiga.yougattme.gatt.trace.BleTrafficTrace
+import de.tobiga.yougattme.gatt.trace.sendTracedResponse
 import de.tobiga.yougattme.gatt.rsc.RunningSpeedAndCadenceProfile
 import de.tobiga.yougattme.tools.toHex
 import de.tobiga.yougattme.bridge.RouteFreshness
@@ -224,12 +228,28 @@ class ApplicationState private constructor(private val context: Context) {
      */
     private val advertiseCallback = object : AdvertiseCallback() {
         override fun onStartSuccess(settingsInEffect: AdvertiseSettings) {
+            BleTrafficTrace.record(
+                role = BleTrafficRole.ADVERTISER,
+                direction = BleTrafficDirection.EVENT,
+                event = "ADVERTISING_STARTED",
+                details = mapOf(
+                    "mode" to settingsInEffect.mode,
+                    "tx_power_level" to settingsInEffect.txPowerLevel,
+                    "connectable" to settingsInEffect.isConnectable
+                )
+            )
             Log.i(TAG, "LE Advertise started")
             isAdvertising = true
             publishRuntimeStatus("Advertising")
         }
 
         override fun onStartFailure(errorCode: Int) {
+            BleTrafficTrace.record(
+                role = BleTrafficRole.ADVERTISER,
+                direction = BleTrafficDirection.EVENT,
+                event = "ADVERTISING_FAILED",
+                status = errorCode
+            )
             isAdvertising = false
             if (errorCode == ADVERTISE_FAILED_DATA_TOO_LARGE) {
                 Log.e(TAG, "Primary advertise packet too large; move UUIDs or data into scan response")
@@ -245,6 +265,15 @@ class ApplicationState private constructor(private val context: Context) {
     private val gattServerCallback = object : BluetoothGattServerCallback() {
 
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
+            BleTrafficTrace.record(
+                role = BleTrafficRole.PERIPHERAL,
+                direction = BleTrafficDirection.EVENT,
+                event = "CONNECTION_STATE",
+                deviceAddress = device.address,
+                deviceName = device.name,
+                status = status,
+                details = mapOf("new_state" to newState)
+            )
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     if (status == BluetoothGatt.GATT_SUCCESS) {
@@ -268,6 +297,14 @@ class ApplicationState private constructor(private val context: Context) {
         }
 
         override fun onMtuChanged(device: BluetoothDevice, mtu: Int) {
+            BleTrafficTrace.record(
+                role = BleTrafficRole.PERIPHERAL,
+                direction = BleTrafficDirection.IN,
+                event = "MTU_CHANGED",
+                deviceAddress = device.address,
+                deviceName = device.name,
+                details = mapOf("mtu" to mtu)
+            )
             Log.i(TAG, "MTU changed for ${device.address}: $mtu")
             activeProfiles.forEach { profile -> profile.onMtuChanged(device, mtu) }
         }
@@ -279,6 +316,14 @@ class ApplicationState private constructor(private val context: Context) {
         }
 
         override fun onServiceAdded(status: Int, service: BluetoothGattService) {
+            BleTrafficTrace.record(
+                role = BleTrafficRole.PERIPHERAL,
+                direction = BleTrafficDirection.EVENT,
+                event = "SERVICE_ADDED",
+                serviceUuid = service.uuid,
+                status = status,
+                details = mapOf("characteristic_count" to service.characteristics.size)
+            )
             Log.i(TAG, "âž• Service added: ${service.uuid} (status=$status)")
             safeServiceMgr?.onServiceAdded(status, service)
         }
@@ -290,6 +335,16 @@ class ApplicationState private constructor(private val context: Context) {
             characteristic: BluetoothGattCharacteristic
         ) {
             val svcUuid = characteristic.service.uuid
+            BleTrafficTrace.record(
+                role = BleTrafficRole.PERIPHERAL,
+                direction = BleTrafficDirection.IN,
+                event = "CHARACTERISTIC_READ_REQUEST",
+                deviceAddress = device.address,
+                deviceName = device.name,
+                serviceUuid = svcUuid,
+                characteristicUuid = characteristic.uuid,
+                details = mapOf("request_id" to requestId, "offset" to offset)
+            )
             Log.d(TAG, "ðŸ“– Read request for char ${characteristic.uuid} on service $svcUuid from ${device.address} (offset=$offset)")
 
             val profile = activeProfiles.find { it.getServiceUUIDs().contains(svcUuid) }
@@ -300,12 +355,12 @@ class ApplicationState private constructor(private val context: Context) {
                 )
                 if (!handled) {
                     Log.w(TAG, "âš ï¸ Read not handled by profile for service $svcUuid")
-                    bluetoothGattServer?.sendResponse(device, requestId,
+                    bluetoothGattServer?.sendTracedResponse(device, requestId,
                         BluetoothGatt.GATT_FAILURE, 0, null)
                 }
             } else {
                 Log.e(TAG, "âŒ Read for unknown service $svcUuid")
-                bluetoothGattServer?.sendResponse(device, requestId,
+                bluetoothGattServer?.sendTracedResponse(device, requestId,
                     BluetoothGatt.GATT_FAILURE, 0, null)
             }
         }
@@ -320,6 +375,22 @@ class ApplicationState private constructor(private val context: Context) {
             value: ByteArray
         ) {
             val svcUuid = characteristic.service.uuid
+            BleTrafficTrace.record(
+                role = BleTrafficRole.PERIPHERAL,
+                direction = BleTrafficDirection.IN,
+                event = "CHARACTERISTIC_WRITE_REQUEST",
+                deviceAddress = device.address,
+                deviceName = device.name,
+                serviceUuid = svcUuid,
+                characteristicUuid = characteristic.uuid,
+                value = value,
+                details = mapOf(
+                    "request_id" to requestId,
+                    "offset" to offset,
+                    "prepared_write" to preparedWrite,
+                    "response_needed" to responseNeeded
+                )
+            )
             Log.d(TAG, "âœï¸ Write request for char ${characteristic.uuid} on service $svcUuid from ${device.address} (offset=$offset) value=${value.toHex()} respNeeded=$responseNeeded")
 
             val profile = activeProfiles.find { it.getServiceUUIDs().contains(svcUuid) }
@@ -331,12 +402,12 @@ class ApplicationState private constructor(private val context: Context) {
                 )
                 if (!handled && responseNeeded) {
                     Log.w(TAG, "âš ï¸ Write not handled by profile for service $svcUuid")
-                    bluetoothGattServer?.sendResponse(device, requestId,
+                    bluetoothGattServer?.sendTracedResponse(device, requestId,
                         BluetoothGatt.GATT_FAILURE, 0, null)
                 }
             } else if (responseNeeded) {
                 Log.e(TAG, "âŒ Write for unknown service $svcUuid")
-                bluetoothGattServer?.sendResponse(device, requestId,
+                bluetoothGattServer?.sendTracedResponse(device, requestId,
                     BluetoothGatt.GATT_FAILURE, 0, null)
             }
         }
@@ -348,6 +419,17 @@ class ApplicationState private constructor(private val context: Context) {
             descriptor: BluetoothGattDescriptor
         ) {
             val svcUuid = descriptor.characteristic.service.uuid
+            BleTrafficTrace.record(
+                role = BleTrafficRole.PERIPHERAL,
+                direction = BleTrafficDirection.IN,
+                event = "DESCRIPTOR_READ_REQUEST",
+                deviceAddress = device.address,
+                deviceName = device.name,
+                serviceUuid = svcUuid,
+                characteristicUuid = descriptor.characteristic.uuid,
+                descriptorUuid = descriptor.uuid,
+                details = mapOf("request_id" to requestId, "offset" to offset)
+            )
             Log.d(TAG, "ðŸ“– Descriptor read ${descriptor.uuid} on char ${descriptor.characteristic.uuid} (service $svcUuid) from ${device.address}")
 
             val profile = activeProfiles.find { it.getServiceUUIDs().contains(svcUuid) }
@@ -358,12 +440,12 @@ class ApplicationState private constructor(private val context: Context) {
                 )
                 if (!handled) {
                     Log.w(TAG, "âš ï¸ Descriptor read not handled by profile for service $svcUuid")
-                    bluetoothGattServer?.sendResponse(device, requestId,
+                    bluetoothGattServer?.sendTracedResponse(device, requestId,
                         BluetoothGatt.GATT_FAILURE, 0, null)
                 }
             } else {
                 Log.e(TAG, "âŒ Descriptor read for unknown service $svcUuid")
-                bluetoothGattServer?.sendResponse(device, requestId,
+                bluetoothGattServer?.sendTracedResponse(device, requestId,
                     BluetoothGatt.GATT_FAILURE, 0, null)
             }
         }
@@ -378,6 +460,23 @@ class ApplicationState private constructor(private val context: Context) {
             value: ByteArray
         ) {
             val svcUuid = descriptor.characteristic.service.uuid
+            BleTrafficTrace.record(
+                role = BleTrafficRole.PERIPHERAL,
+                direction = BleTrafficDirection.IN,
+                event = "DESCRIPTOR_WRITE_REQUEST",
+                deviceAddress = device.address,
+                deviceName = device.name,
+                serviceUuid = svcUuid,
+                characteristicUuid = descriptor.characteristic.uuid,
+                descriptorUuid = descriptor.uuid,
+                value = value,
+                details = mapOf(
+                    "request_id" to requestId,
+                    "offset" to offset,
+                    "prepared_write" to preparedWrite,
+                    "response_needed" to responseNeeded
+                )
+            )
             Log.d(TAG, "âœï¸ Descriptor write ${descriptor.uuid} on char ${descriptor.characteristic.uuid} (service $svcUuid) from ${device.address} value=${value.toHex()} respNeeded=$responseNeeded")
 
             val profile = activeProfiles.find { it.getServiceUUIDs().contains(svcUuid) }
@@ -389,14 +488,26 @@ class ApplicationState private constructor(private val context: Context) {
                 )
                 if (!handled && responseNeeded) {
                     Log.w(TAG, "âš ï¸ Descriptor write not handled by profile for service $svcUuid")
-                    bluetoothGattServer?.sendResponse(device, requestId,
+                    bluetoothGattServer?.sendTracedResponse(device, requestId,
                         BluetoothGatt.GATT_FAILURE, 0, null)
                 }
             } else if (responseNeeded) {
                 Log.e(TAG, "âŒ Descriptor write for unknown service $svcUuid")
-                bluetoothGattServer?.sendResponse(device, requestId,
+                bluetoothGattServer?.sendTracedResponse(device, requestId,
                     BluetoothGatt.GATT_FAILURE, 0, null)
             }
+        }
+
+        override fun onExecuteWrite(device: BluetoothDevice, requestId: Int, execute: Boolean) {
+            BleTrafficTrace.record(
+                role = BleTrafficRole.PERIPHERAL,
+                direction = BleTrafficDirection.IN,
+                event = "EXECUTE_WRITE_REQUEST",
+                deviceAddress = device.address,
+                deviceName = device.name,
+                details = mapOf("request_id" to requestId, "execute" to execute)
+            )
+            super.onExecuteWrite(device, requestId, execute)
         }
     }
 
@@ -484,6 +595,18 @@ class ApplicationState private constructor(private val context: Context) {
             val scanResponseData = scanResponseBuilder.build()
 
             try {
+                BleTrafficTrace.record(
+                    role = BleTrafficRole.ADVERTISER,
+                    direction = BleTrafficDirection.OUT,
+                    event = "ADVERTISING_START_REQUEST",
+                    deviceName = bluetoothManager.adapter.name,
+                    details = mapOf(
+                        "connectable" to true,
+                        "service_uuids" to activeProfiles.flatMap { profile ->
+                            profile.getServiceUUIDs()
+                        }.joinToString(",")
+                    )
+                )
                 it.startAdvertising(settings, advertiseData, scanResponseData, advertiseCallback)
             } catch (exception: IllegalArgumentException) {
                 Log.e(TAG, "Invalid advertise data", exception)
@@ -501,6 +624,13 @@ class ApplicationState private constructor(private val context: Context) {
      * Stop Bluetooth advertisements.
      */
     private fun stopAdvertising() {
+        if (isAdvertising) {
+            BleTrafficTrace.record(
+                role = BleTrafficRole.ADVERTISER,
+                direction = BleTrafficDirection.OUT,
+                event = "ADVERTISING_STOP"
+            )
+        }
         stopCyclingPowerBroadcast()
         if (!::bluetoothManager.isInitialized) {
             isAdvertising = false
@@ -520,6 +650,13 @@ class ApplicationState private constructor(private val context: Context) {
 
     private fun updateCyclingPowerBroadcast(enabled: Boolean, payload: ByteArray) {
         mainHandler.post {
+            BleTrafficTrace.record(
+                role = BleTrafficRole.ADVERTISER,
+                direction = if (enabled) BleTrafficDirection.OUT else BleTrafficDirection.EVENT,
+                event = if (enabled) "SERVICE_DATA_BROADCAST" else "SERVICE_DATA_BROADCAST_STOP",
+                serviceUuid = UUID.fromString("00001818-0000-1000-8000-00805f9b34fb"),
+                value = payload.takeIf { enabled }
+            )
             cyclingPowerBroadcastRequested = enabled
             pendingCyclingPowerBroadcastPayload = payload.copyOf()
             if (!enabled) {

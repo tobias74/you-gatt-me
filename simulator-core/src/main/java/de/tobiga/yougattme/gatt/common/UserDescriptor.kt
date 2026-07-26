@@ -1,5 +1,7 @@
 package de.tobiga.yougattme.gatt.common
 
+import de.tobiga.yougattme.gatt.trace.sendTracedResponse
+
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattDescriptor
@@ -17,7 +19,7 @@ class UserDescriptor(val myGattProfile: AbstractGattProfile, val description: By
     }
 
     override fun onReadRequest(device: BluetoothDevice, requestId: Int, offset: Int) {
-        gattProfile.bluetoothGattServer!!.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS,0, description)
+        gattProfile.bluetoothGattServer!!.sendTracedResponse(device, requestId, BluetoothGatt.GATT_SUCCESS,0, description)
 
     }
 

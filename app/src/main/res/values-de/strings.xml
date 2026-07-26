@@ -1,4 +1,10 @@
 <resources>
+    <string name="ble_capture_category">Diagnose</string>
+    <string name="ble_capture_title">Gesamte BLE-Kommunikation aufzeichnen</string>
+    <string name="ble_capture_summary_off">Aus. Aufzeichnungen enthalten Gerätenamen, Adressen, UUIDs und rohe Paketdaten.</string>
+    <string name="ble_capture_summary_on">Aufzeichnung läuft. Ausschalten, um die aktuelle Datei abzuschließen.</string>
+    <string name="ble_capture_location_title">Speicherort</string>
+    <string name="ble_capture_location_summary">Downloads/YouGattMe/BLE captures (JSON Lines, neue Datei nach 25 MB)</string>
     <string name="app_name">YouGattMe</string>
     <string name="action_settings">Einstellungen</string>
     <!-- Strings used for fragments for navigation -->

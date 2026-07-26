@@ -1,5 +1,7 @@
 package de.tobiga.yougattme.gatt.common
 
+import de.tobiga.yougattme.gatt.trace.sendTracedResponse
+
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattDescriptor
@@ -26,7 +28,7 @@ class ServerConfigDescriptor(
         } else {
             byteArrayOf(0x00, 0x00)
         }
-        gattProfile.bluetoothGattServer?.sendResponse(
+        gattProfile.bluetoothGattServer?.sendTracedResponse(
             device,
             requestId,
             BluetoothGatt.GATT_SUCCESS,
@@ -53,7 +55,7 @@ class ServerConfigDescriptor(
             BluetoothGatt.GATT_FAILURE
         }
         if (responseNeeded) {
-            gattProfile.bluetoothGattServer?.sendResponse(device, requestId, status, 0, null)
+            gattProfile.bluetoothGattServer?.sendTracedResponse(device, requestId, status, 0, null)
         }
     }
 

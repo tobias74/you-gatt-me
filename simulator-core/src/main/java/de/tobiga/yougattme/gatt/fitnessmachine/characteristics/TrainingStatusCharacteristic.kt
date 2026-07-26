@@ -1,5 +1,7 @@
 package de.tobiga.yougattme.gatt.fitnessmachine.characteristics
 
+import de.tobiga.yougattme.gatt.trace.sendTracedResponse
+
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCharacteristic
@@ -51,11 +53,11 @@ class TrainingStatusCharacteristic(
     override fun onReadRequest(device: BluetoothDevice, requestId: Int, offset: Int) {
         val data = getData()
         if (offset > data.size) {
-            gattProfile.bluetoothGattServer!!.sendResponse(device, requestId, BluetoothGatt.GATT_FAILURE, 0, null)
+            gattProfile.bluetoothGattServer!!.sendTracedResponse(device, requestId, BluetoothGatt.GATT_FAILURE, 0, null)
             return
         }
 
-        gattProfile.bluetoothGattServer!!.sendResponse(
+        gattProfile.bluetoothGattServer!!.sendTracedResponse(
             device,
             requestId,
             BluetoothGatt.GATT_SUCCESS,
@@ -73,7 +75,7 @@ class TrainingStatusCharacteristic(
         value: ByteArray
     ) {
         if (responseNeeded) {
-            gattProfile.bluetoothGattServer!!.sendResponse(
+            gattProfile.bluetoothGattServer!!.sendTracedResponse(
                 device,
                 requestId,
                 BluetoothGatt.GATT_WRITE_NOT_PERMITTED,

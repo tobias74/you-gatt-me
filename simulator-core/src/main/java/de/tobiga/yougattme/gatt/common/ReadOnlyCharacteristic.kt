@@ -1,5 +1,7 @@
 package de.tobiga.yougattme.gatt.common
 
+import de.tobiga.yougattme.gatt.trace.sendTracedResponse
+
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCharacteristic
@@ -59,7 +61,7 @@ class ReadOnlyCharacteristic(
 
         Log.d(TAG, "Responding to read of $uuid: offset=$offset, bytes=${chunk.size}")
 
-        gattProfile.bluetoothGattServer!!.sendResponse(
+        gattProfile.bluetoothGattServer!!.sendTracedResponse(
             device,
             requestId,
             BluetoothGatt.GATT_SUCCESS,
@@ -78,7 +80,7 @@ class ReadOnlyCharacteristic(
     ) {
         Log.w(TAG, "Unexpected write to read‑only $uuid: ${value.toHex()}")
         if(responseNeeded) {
-            gattProfile.bluetoothGattServer!!.sendResponse(
+            gattProfile.bluetoothGattServer!!.sendTracedResponse(
                 device,
                 requestId,
                 BluetoothGatt.GATT_WRITE_NOT_PERMITTED,

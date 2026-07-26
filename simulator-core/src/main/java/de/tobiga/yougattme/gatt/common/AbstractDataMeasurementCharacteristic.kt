@@ -1,5 +1,7 @@
 package de.tobiga.yougattme.gatt.common
 
+import de.tobiga.yougattme.gatt.trace.sendTracedResponse
+
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.util.Log
@@ -88,7 +90,7 @@ abstract class AbstractDataMeasurementCharacteristic(
     override fun onReadRequest(device: BluetoothDevice, requestId: Int, offset: Int) {
         Log.d("BLE", "responding to read request in data characteristic: ${getData().toHex()}")
 
-        gattProfile.bluetoothGattServer!!.sendResponse(
+        gattProfile.bluetoothGattServer!!.sendTracedResponse(
             device,
             requestId,
             BluetoothGatt.GATT_SUCCESS,
@@ -107,7 +109,7 @@ abstract class AbstractDataMeasurementCharacteristic(
     ) {
         Log.d("BLE", "Received write request in data characteristic? ::: ${value.toHex()}")
         if(responseNeeded) {
-            gattProfile.bluetoothGattServer!!.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
+            gattProfile.bluetoothGattServer!!.sendTracedResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
         }
     }
 

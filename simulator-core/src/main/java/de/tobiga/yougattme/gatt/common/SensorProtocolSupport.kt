@@ -1,5 +1,7 @@
 package de.tobiga.yougattme.gatt.common
 
+import de.tobiga.yougattme.gatt.trace.sendTracedResponse
+
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCharacteristic
@@ -68,7 +70,7 @@ class ReadOnlyValueCharacteristic(
     override fun onReadRequest(device: BluetoothDevice, requestId: Int, offset: Int) {
         val value = valueProvider()
         if (offset !in 0..value.size) {
-            gattProfile.bluetoothGattServer?.sendResponse(
+            gattProfile.bluetoothGattServer?.sendTracedResponse(
                 device,
                 requestId,
                 BluetoothGatt.GATT_INVALID_OFFSET,
@@ -77,7 +79,7 @@ class ReadOnlyValueCharacteristic(
             )
             return
         }
-        gattProfile.bluetoothGattServer?.sendResponse(
+        gattProfile.bluetoothGattServer?.sendTracedResponse(
             device,
             requestId,
             BluetoothGatt.GATT_SUCCESS,
@@ -95,7 +97,7 @@ class ReadOnlyValueCharacteristic(
         value: ByteArray
     ) {
         if (responseNeeded) {
-            gattProfile.bluetoothGattServer?.sendResponse(
+            gattProfile.bluetoothGattServer?.sendTracedResponse(
                 device,
                 requestId,
                 BluetoothGatt.GATT_WRITE_NOT_PERMITTED,
