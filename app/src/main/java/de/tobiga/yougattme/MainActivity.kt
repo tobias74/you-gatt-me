@@ -128,16 +128,21 @@ class MainActivity : AppCompatActivity() {
         val supportsCapabilityMirroring: Boolean = true
     )
 
-    private data class ServiceProfileRow(
+    private class ServiceProfileRow(
         val key: String,
         val title: String,
         val subtitle: String,
-        val contentView: View,
+        private val contentFactory: () -> View,
         val isEnabled: () -> Boolean,
         val summary: () -> String,
         val setEnabled: (Boolean) -> Unit,
         val toggleVisible: Boolean = true
-    )
+    ) {
+        private var cachedContentView: View? = null
+
+        fun contentView(): View = cachedContentView
+            ?: contentFactory().also { content -> cachedContentView = content }
+    }
 
     private data class RoutingHost(
         val outputKey: () -> String?,
@@ -1145,7 +1150,7 @@ class MainActivity : AppCompatActivity() {
                 key = "ftms",
                 title = "FTMS",
                 subtitle = "Fitness Machine Service. Choose exactly one equipment type inside this panel.",
-                contentView = prepareServiceContent(binding.layoutFtmsLiveData) { "ftms" },
+                contentFactory = { prepareServiceContent(binding.layoutFtmsLiveData) { "ftms" } },
                 isEnabled = { ftmsEnabled },
                 summary = { ftmsSummary() },
                 setEnabled = { enabled -> setFtmsServiceEnabled(enabled) }
@@ -1154,7 +1159,7 @@ class MainActivity : AppCompatActivity() {
                 key = "csc",
                 title = "CSC",
                 subtitle = profiles["csc"]?.subtitle ?: "Cycling Speed and Cadence simulation.",
-                contentView = prepareServiceContent(binding.layoutCscLiveData) { "csc" },
+                contentFactory = { prepareServiceContent(binding.layoutCscLiveData) { "csc" } },
                 isEnabled = { selectedOptionalServiceKeys.contains("csc") },
                 summary = { cscSummary() },
                 setEnabled = { enabled -> setOptionalServiceEnabled("csc", enabled) }
@@ -1163,7 +1168,7 @@ class MainActivity : AppCompatActivity() {
                 key = "cycling_power",
                 title = "Cycling Power",
                 subtitle = profiles["cycling_power"]?.subtitle ?: "Cycling Power Measurement simulation.",
-                contentView = prepareServiceContent(binding.layoutCyclingPowerLiveData) { "cycling_power" },
+                contentFactory = { prepareServiceContent(binding.layoutCyclingPowerLiveData) { "cycling_power" } },
                 isEnabled = { selectedOptionalServiceKeys.contains("cycling_power") },
                 summary = { cyclingPowerSummary() },
                 setEnabled = { enabled -> setOptionalServiceEnabled("cycling_power", enabled) }
@@ -1172,7 +1177,7 @@ class MainActivity : AppCompatActivity() {
                 key = "rsc",
                 title = "RSC",
                 subtitle = profiles["rsc"]?.subtitle ?: "Running Speed and Cadence simulation.",
-                contentView = prepareServiceContent(binding.layoutRscLiveData) { "rsc" },
+                contentFactory = { prepareServiceContent(binding.layoutRscLiveData) { "rsc" } },
                 isEnabled = { selectedOptionalServiceKeys.contains("rsc") },
                 summary = { rscSummary() },
                 setEnabled = { enabled -> setOptionalServiceEnabled("rsc", enabled) }
@@ -1181,7 +1186,7 @@ class MainActivity : AppCompatActivity() {
                 key = "heart_rate",
                 title = "Heart Rate",
                 subtitle = profiles["heart_rate"]?.subtitle ?: "Heart Rate Service simulation.",
-                contentView = prepareServiceContent(binding.layoutHeartRateLiveData) { "heart_rate" },
+                contentFactory = { prepareServiceContent(binding.layoutHeartRateLiveData) { "heart_rate" } },
                 isEnabled = { selectedOptionalServiceKeys.contains("heart_rate") },
                 summary = { heartRateSummary() },
                 setEnabled = { enabled -> setOptionalServiceEnabled("heart_rate", enabled) }
@@ -1230,6 +1235,9 @@ class MainActivity : AppCompatActivity() {
             }
             container.addView(routingContainer)
             routingHosts += RoutingHost(routingOutputKey, routingContainer)
+            if (::serviceProfileAdapter.isInitialized) {
+                renderRouteControls()
+            }
         }
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1258,8 +1266,10 @@ class MainActivity : AppCompatActivity() {
             key = "exclusive:${group.groupKey}",
             title = exclusiveGroupTitle(group.groupKey),
             subtitle = "Select exactly one profile from this mutually exclusive group.",
-            contentView = prepareServiceContent(createExclusiveProfileGroupContent(group)) {
-                selectedProfileForExclusiveGroup(group).bridgeOutput?.outputKey
+            contentFactory = {
+                prepareServiceContent(createExclusiveProfileGroupContent(group)) {
+                    selectedProfileForExclusiveGroup(group).bridgeOutput?.outputKey
+                }
             },
             isEnabled = { selectedOptionalServiceKeys.any { key -> key in groupKeys } },
             summary = {
@@ -1975,8 +1985,10 @@ class MainActivity : AppCompatActivity() {
             key = profile.key,
             title = profile.title,
             subtitle = profile.subtitle,
-            contentView = prepareServiceContent(createExtensionProfileContent(profile, provider)) {
-                profile.bridgeOutput?.outputKey
+            contentFactory = {
+                prepareServiceContent(createExtensionProfileContent(profile, provider)) {
+                    profile.bridgeOutput?.outputKey
+                }
             },
             isEnabled = isEnabled,
             summary = {
@@ -2132,7 +2144,7 @@ class MainActivity : AppCompatActivity() {
 
         override fun getGroup(groupPosition: Int): ServiceProfileRow = rows[groupPosition]
 
-        override fun getChild(groupPosition: Int, childPosition: Int): View = rows[groupPosition].contentView
+        override fun getChild(groupPosition: Int, childPosition: Int): View = rows[groupPosition].contentView()
 
         override fun getGroupId(groupPosition: Int): Long = groupPosition.toLong()
 
@@ -2197,12 +2209,13 @@ class MainActivity : AppCompatActivity() {
             parent: ViewGroup?
         ): View {
             val row = getGroup(groupPosition)
-            row.contentView.alpha = if (row.isEnabled()) 1f else 0.58f
-            row.contentView.layoutParams = AbsListView.LayoutParams(
+            val contentView = row.contentView()
+            contentView.alpha = if (row.isEnabled()) 1f else 0.58f
+            contentView.layoutParams = AbsListView.LayoutParams(
                 AbsListView.LayoutParams.MATCH_PARENT,
                 AbsListView.LayoutParams.WRAP_CONTENT
             )
-            return row.contentView
+            return contentView
         }
     }
 

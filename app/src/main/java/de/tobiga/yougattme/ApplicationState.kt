@@ -64,7 +64,9 @@ class ApplicationState private constructor(private val context: Context) {
 
     private val activeProfiles = mutableSetOf<AbstractGattProfile>()
     private val connectedDevices = mutableSetOf<BluetoothDevice>()
+    private val advertisingStateLock = Any()
     private var isAdvertising = false
+    private var advertisingStartPending = false
     private var cyclingPowerAdvertisingSet: AdvertisingSet? = null
     private var cyclingPowerBroadcastStartPending = false
     private var cyclingPowerBroadcastRequested = false
@@ -239,7 +241,10 @@ class ApplicationState private constructor(private val context: Context) {
                 )
             )
             Log.i(TAG, "LE Advertise started")
-            isAdvertising = true
+            synchronized(advertisingStateLock) {
+                advertisingStartPending = false
+                isAdvertising = true
+            }
             publishRuntimeStatus("Advertising")
         }
 
@@ -250,11 +255,25 @@ class ApplicationState private constructor(private val context: Context) {
                 event = "ADVERTISING_FAILED",
                 status = errorCode
             )
-            isAdvertising = false
-            if (errorCode == ADVERTISE_FAILED_DATA_TOO_LARGE) {
+            if (errorCode == ADVERTISE_FAILED_ALREADY_STARTED) {
+                synchronized(advertisingStateLock) {
+                    advertisingStartPending = false
+                    isAdvertising = true
+                }
+                Log.w(TAG, "LE advertiser was already active; keeping Advertising status")
+                publishRuntimeStatus("Advertising")
+            } else if (errorCode == ADVERTISE_FAILED_DATA_TOO_LARGE) {
+                synchronized(advertisingStateLock) {
+                    advertisingStartPending = false
+                    isAdvertising = false
+                }
                 Log.e(TAG, "Primary advertise packet too large; move UUIDs or data into scan response")
                 publishRuntimeStatus("Advertising data too large", isError = true)
             } else {
+                synchronized(advertisingStateLock) {
+                    advertisingStartPending = false
+                    isAdvertising = false
+                }
                 Log.e(TAG, "LE Advertise failed: code=$errorCode")
                 publishRuntimeStatus("Advertising failed ($errorCode)", isError = true)
             }
@@ -555,14 +574,26 @@ class ApplicationState private constructor(private val context: Context) {
      */
     private fun startAdvertising() {
         Log.w(TAG, "in start advertising")
-        if (isAdvertising) {
-            stopAdvertising()
+        synchronized(advertisingStateLock) {
+            if (isAdvertising) {
+                Log.i(TAG, "LE advertiser is already active; skipping duplicate start")
+                publishRuntimeStatus("Advertising")
+                return
+            }
+            if (advertisingStartPending) {
+                Log.i(TAG, "LE advertiser start is already pending; skipping duplicate start")
+                return
+            }
+            advertisingStartPending = true
         }
 
         val bluetoothLeAdvertiser: BluetoothLeAdvertiser? =
             bluetoothManager.adapter.bluetoothLeAdvertiser
 
         if (bluetoothLeAdvertiser == null) {
+            synchronized(advertisingStateLock) {
+                advertisingStartPending = false
+            }
             publishRuntimeStatus("BLE advertiser unavailable", isError = true)
             return
         }
@@ -610,11 +641,17 @@ class ApplicationState private constructor(private val context: Context) {
                 it.startAdvertising(settings, advertiseData, scanResponseData, advertiseCallback)
             } catch (exception: IllegalArgumentException) {
                 Log.e(TAG, "Invalid advertise data", exception)
-                isAdvertising = false
+                synchronized(advertisingStateLock) {
+                    advertisingStartPending = false
+                    isAdvertising = false
+                }
                 publishRuntimeStatus("Advertising data invalid", isError = true)
             } catch (exception: IllegalStateException) {
                 Log.e(TAG, "Advertiser is not in a usable state", exception)
-                isAdvertising = false
+                synchronized(advertisingStateLock) {
+                    advertisingStartPending = false
+                    isAdvertising = false
+                }
                 publishRuntimeStatus("Advertising unavailable", isError = true)
             }
         }
@@ -624,7 +661,13 @@ class ApplicationState private constructor(private val context: Context) {
      * Stop Bluetooth advertisements.
      */
     private fun stopAdvertising() {
-        if (isAdvertising) {
+        val wasAdvertising = synchronized(advertisingStateLock) {
+            val wasActive = isAdvertising
+            advertisingStartPending = false
+            isAdvertising = false
+            wasActive
+        }
+        if (wasAdvertising) {
             BleTrafficTrace.record(
                 role = BleTrafficRole.ADVERTISER,
                 direction = BleTrafficDirection.OUT,
@@ -633,7 +676,6 @@ class ApplicationState private constructor(private val context: Context) {
         }
         stopCyclingPowerBroadcast()
         if (!::bluetoothManager.isInitialized) {
-            isAdvertising = false
             return
         }
         val bluetoothLeAdvertiser: BluetoothLeAdvertiser? =
@@ -645,7 +687,6 @@ class ApplicationState private constructor(private val context: Context) {
                 Log.w(TAG, "Ignoring advertiser stop failure", exception)
             }
         }
-        isAdvertising = false
     }
 
     private fun updateCyclingPowerBroadcast(enabled: Boolean, payload: ByteArray) {
